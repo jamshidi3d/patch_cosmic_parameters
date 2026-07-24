@@ -1,0 +1,7 @@
+.claude/
+.aider*/
+.vscode
+backup/
+input/
+output/
+__pycache__/
