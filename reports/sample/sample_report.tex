@@ -1,0 +1,209 @@
+% !TEX program = xelatex
+\documentclass[12pt]{article}
+
+\usepackage{amsmath}
+\usepackage{setspace}
+\usepackage[unicode]{hyperref}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage[labelfont={bf,large},font={large}]{caption}
+\usepackage{xepersian}
+\settextfont{XB Niloofar}
+
+
+
+\title{گزارش پیشرفت}
+
+% \date{\vspace{-8ex}\today}
+
+\date{\vspace{-6ex}\normalsize بهمن 1402}
+
+\setstretch{1.1}
+
+
+\begin{document}
+% title
+
+\vspace{-10ex}
+\centerline{به نام او}
+{\let\newpage\relax\maketitle}
+\textbf{
+    \large
+    \centerline{عنوان پیشنهاده: ناهنجاری جهتی در داده‌های بزرگ مقیاس کیهانی}
+}
+% end title
+
+\thispagestyle{empty}
+
+
+
+در نیم سال گذشته تمرکز ما بر روی بازتولید ناهنجاری‌های گزارش شده در تابش زمینه کیهانی بود.
+یکی از این ناهنجاری‌ها، ناهنجاری دوقطبی در نقشه واریانس دمایی است.
+\lr{[Planck VII 2018]}
+روش به کار رفته در پژوهش فوق،
+برای اولین بار در
+\lr{[Akrami et.al 2014]}
+انجام شد.
+ما طی جلساتی با آقای دکتر اکرمی مقاله 
+\lr{[Akrami et.al 2014]}
+را به طور کامل بازتولید کردیم و نتایج آن هم که در سازگاری با نتایج پیشین بود در ادامه آمده است.
+این روش به شرح زیر است:
+\subsection*{
+    ناهنجاری واریانس موضعی
+}
+
+ما 3072 دیسک
+(عرقچین)
+با اندازه‌های مختلف به مرکز پیکسل‌های یک نقشه‌ی 
+\lr{HEALPix}
+ با 
+$N_{side} = 16$
+را در نظر می‌گیریم
+(این تعداد، همان تعداد مقاله یاد شده است).
+
+برای هر عرقچین و نقشه‌ی آسمانی، واریانس دمایی را تنها برای پیکسل‌هایی که ماسک نشده‌اند،
+محاسبه می‌کنیم؛ هر عرقچینی که بیش از 90 درصد آن ماسک شده باشد فاقد اعتبار دانسته، در محدوده‌ی ماسک در نظر گرفته می‌شود.
+با نسبت دادن این مقادیر واریانس به پیکسل‌های نقشه‌ی 
+$N_{side} = 16$
+یک نقشه‌ی واریانس موضعی
+(که دارای ماسک هم هست)
+به دست می‌آید.
+این کار را هم برای خود داده 
+\lr{CMB}
+و هم برای 1000 شبیه‌سازی که با الگوریتم یکسان تهیه شده‌اند
+(و نویز هم به آنها اضافه شده است)
+انجام می‌دهیم و به این ترتیب
+1000 + 1
+نقشه‌ی واریانس موضعی خواهیم داشت.
+
+میانگین و واریانس این نقشه‌های واریانس، خود مهم هستند چرا که باید بررسی کرد که مقادیر 
+به دست آمده از 
+\lr{CMB}
+یا هر یک از شبیه‌سازی‌ها به چه میزان از مقدار میانگین فاصله دارد و چقدر نامحتمل است.
+برای به دست آوردن میانگین و واریانس انتظاری از هر عرقچین، 
+از آنجا که نویز هم به نقشه‌ها اضافه شده است، مکان عرقچین‌ها اهمیت پیدا می‌کنند
+چرا که با افزودن نویز می‌توان آن دسته از عرقچین‌هایی که مکان یکسانی دارند
+(در همه 1000+1 نقشه)،
+را از یک آنسامبل دانست.
+پس با محاسبه‌ی میانگین و واریانس عرقچین‌های هم‌مکان
+میانگین و واریانس آنسامبلی نقشه‌ی واریانس را به دست می‌آوریم.
+حال میانگین را از همه عرقچین‌های هم‌مکان کم می‌کنیم.
+
+اما برای مقایسه هنوز یک گام دیگر باید برداریم.
+عرقچین‌هایی که مکان‌های مختلفی دارند باید وزن‌های متفاوتی داشته باشند
+چرا که میزان پیکسل‌های ماسک شده در آنها متفاوت است.
+حال هر قدر تعداد پیکسل‌های ماسک شده بیشتر باشد، افت و خیز در یک عرقچین بیشتر است.
+عکس واریانس آنسابلی را به عنوان وزن گرفته و در مقدار بالا ضرب می‌کنیم:
+
+\begin{align}
+    \nonumber
+    \frac{1}{Var(Var)} \big(Var(T) - <Var(T)>\big)
+\end{align}
+
+حال با در دست داشتن این مقدار در تمام پیکسل‌ها، 
+یک دوقطبی به نقشه برازش می‌کنیم که جهت و دامنه ناهنجاری را به ما می‌دهد.
+مقایسه دامنه دوقطبی 
+\lr{CMB}
+با شبیه‌سازی‌ها برای اندازه‌های مختلف عرقچین
+(دیسک)
+به ما نشان می‌دهد که
+\lr{CMB}
+به چه میزان بهنجار یا ناهنجار است. در
+\hyperref[plt_01]{نمودار 1}
+\lr{p-value}
+به دست آمده در مقاله و آنچه ما به دست آورده‌ایم، آمده است:
+
+همچنین اگر نقشه‌ی واریانس 
+(که مقدار میانگین از آن کم شده و وزن دهی شده است)
+را بر حسب هماهنگ‌های کروی بسط بدهیم و از ضرایب آن 
+$C_l$
+(یا همان واریانس ضرایب 
+$a_{lm}$
+)
+را محاسبه کنیم، خواهیم دید که جمله مربوط به 
+$l=1$
+از دیگر مقیاس‌ها بزرگتر است
+(
+\hyperref[plt_02]{نمودار 2}
+)
+
+\subsection*{ایده پیش رو:}
+
+از آنجا که سنجه 
+$C_l$
+تنها وابسته به جدایی زاویه‌ای است و جهت در آن بی معنی است،
+ما تلاش داریم این کار را به گونه‌ای دیگر تکرار کنیم که در آن جهت‌های مختلف تمییز داده شوند.
+برای این منظور ما از هندسه‌ی نواری در مکان‌ها و جهات مختلف بهره می‌بریم.
+نوارها به ما این امکان را می‌دهند که بتوانیم ضرایب بسط 
+$\sum a_{lm} Y_{lm}$
+را برای 
+$l=0$
+در همه جهات مقایسه کنیم و بررسی کنیم که آیا جهت مرجحی برای اینگونه ناهنجاری وجود دارد یا خیر.
+\\
+\\
+\\
+
+\noindent
+با احترام
+
+\noindent
+محمدحسین جمشیدی
+
+\newpage
+
+\begin{thebibliography}{9}
+    \begin{latin}
+        
+        \bibitem{akrami2014power}
+        Akrami, Y and Fantaye, Y and Shafieloo, A and Eriksen, HK and Hansen, Frode Kristian and Banday, Anthony J and G{\'o}rski, Krzysztof M,
+        \textit{
+            Power asymmetry in WMAP and Planck temperature sky maps as measured by a local variance estimator
+            }
+            ,
+            The Astrophysical Journal Letters,
+            2014.
+        \bibitem{akrami2020planck},
+        Akrami, Yashar and Ashdown, M and Aumont, Jonathan and Baccigalupi, Carlo and Ballardini, M and Banday, Anthony J and Barreiro, RB and Bartolo, Nicola and Basak, S and Benabed, K and others,
+        \textit{Planck 2018 results-VII. Isotropy and statistics of the CMB},
+        Astronomy \& Astrophysics,
+        2020.
+    
+    \end{latin}
+\end{thebibliography}
+
+\begin{figure}
+    \begin{center}
+        \includegraphics[height=8cm]{DipoleAmplitude.png}
+        \includegraphics[height=6cm]{DipoleAmplitude_akrami.PNG}
+        \caption[]
+        {
+            \normalsize
+            مقایسه دامنه‌های دوقطبی بازتولید شده 
+            (بالا)
+            و  
+            \lr{Akrami et.al 2014} (پایین)
+
+            اندک تفاوت میان نتایج به علت استفاده از سری داده‌های متفاوت 
+            پلانک است که در سال‌های مختلف منتشر شده
+            }
+    \end{center}
+    \label{plt_01}
+\end{figure}
+
+\begin{figure}
+    \begin{center}
+        \includegraphics[height=8cm]{C_l.png}
+        \includegraphics[height=6cm]{C_l_akrami.PNG}
+        \caption[]
+        {
+            \normalsize
+            مقایسه $C_l$ بازتولید شده 
+            (بالا)
+            و  
+            \lr{Akrami et.al 2014} (پایین)
+            }
+    \end{center}
+    \label{plt_02}
+\end{figure}
+
+\end{document}

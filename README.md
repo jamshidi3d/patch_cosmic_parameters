@@ -23,7 +23,8 @@ PR3/2018 unless noted):
 |---|---|
 | `COM_CMB_IQU-smica_2048_R3.00_hm1.fits` | half-mission 1 map (I, Q, U) |
 | `COM_CMB_IQU-smica_2048_R3.00_hm2.fits` | half-mission 2 map (I, Q, U) |
-| `COM_Mask_CMB-common-Mask-Int_2048_R3.00.fits` | sky mask (reused for both temperature and polarization -- see REPORT.md's deviations section) |
+| `COM_Mask_CMB-common-Mask-Int_2048_R3.00.fits` | intensity (temperature) sky mask |
+| `COM_Mask_CMB-common-Mask-Pol_2048_R3.00.fits` | polarization sky mask (joint TT+TE+EE notebook only) |
 
 Both are read with `healpy.read_map`, converted `K_CMB -> uK_CMB` (`*1e6`)
 immediately after loading, and left in `RING` ordering (healpy converts

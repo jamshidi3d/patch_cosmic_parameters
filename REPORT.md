@@ -179,11 +179,11 @@ for the code-level detail on each.
 - **Data**: PR3 SMICA `hm1`/`hm2` half-mission splits, not the paper's
   PR4 NPIPE SEVEM detector A/B splits (not available locally without a
   Planck Legacy Archive download).
-- **Polarization mask**: the same apodized common intensity mask is used
-  for both temperature and polarization, rather than a separate Pol
-  confidence mask — this also lets a single `NmtCovarianceWorkspace`
-  serve every joint-covariance block. The paper's own T/P `fsky` values
-  differ by <1% anyway (its Table 1).
+- **Polarization mask**: Planck's separate common Pol confidence mask is
+  used for Q/U (not the intensity mask). `compute_joint_tt_te_ee_covariance`
+  builds each TT/TE/EE covariance block from the coupling coefficients of
+  the actual T/Pol field combination entering it, rather than assuming one
+  shared `NmtCovarianceWorkspace` -- necessary once the two masks differ.
 - **Error bars**: analytic NaMaster Gaussian covariance, not the paper's
   600 Planck PR4 end-to-end simulations (not available locally).
 - **Sky coverage**: the full common-mask footprint (one region), not the

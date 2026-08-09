@@ -1,0 +1,84 @@
+% !TEX program = xelatex
+\documentclass[14pt]{extarticle}
+
+\usepackage{amsmath}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[labelfont={bf},font={normalsize}]{caption}
+\usepackage{xepersian}
+\settextfont{XB Niloofar}
+
+\title{برازش پارامترهای کیهان‌شناسی از طیف توان قطعات آسمان (فقط \lr{TT})}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{خلاصه}
+با استفاده از نقشه‌های دمایی \lr{SMICA} پلانک (\lr{hm1 $\times$ hm2})،
+طیف متقاطع \lr{TT} و کوواریانس گاوسی آن با \lr{NaMaster} روی ماسک شدت مشترک
+برآورد شد، و پارامترهای \lr{$\Lambda$CDM} به‌همراه دامنه چشمه‌های نقطه‌ای
+$A_{ps}^{TT}$ با \lr{iminuit} برازش شدند، در حالی که $A_s$ و $n_s$ در
+مقادیر مرجع پلانک ۲۰۱۸ ثابت نگه داشته شدند. همین پردازش 
+(
+تنها-\lr{TT}
+)
+سپس به‌طور مستقل روی هر یک از ۱۲ قطعه مجزای \lr{HEALPix} با
+$N_{side}=1$ (شکل~\ref{fig:patches}) تکرار شد. جدول~\ref{tab:params} پارامترهای بهترین‌برازش و
+عدم‌قطعیت‌های به‌دست‌آمده برای هر قطعه را فهرست می‌کند، و شکل‌های
+\ref{fig:bandpowers} و \ref{fig:paramsplot} به ترتیب طیف‌توان‌های هر قطعه و
+پارامترهای بازیابی‌شده در قطعات مختلف را نشان می‌دهند.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{../output/patches_map.png}
+    \caption{۱۲ محدوده‌های مجزای $N_{side}=1$ که با ماسک پلانک
+    (اپودایز‌شده) هم‌پوشانی داده شده‌اند.}
+    \label{fig:patches}
+\end{figure}
+
+\begin{table}[htbp]
+    \centering
+    \small
+    \caption{پارامترهای بهترین‌برازش هر قطعه (فقط \lr{TT}؛ $A_s$ و $n_s$ در
+    مقادیر مرجع پلانک ۲۰۱۸، به‌ترتیب $2.1\times10^{-9}$ و $0.9649$، ثابت
+    نگه داشته شده‌اند).}
+    \label{tab:params}
+    \begin{tabular}{cccccccc}
+        \toprule
+        قطعه & $f_{sky}$ & $\chi^2$ & همگرایی & $H_0$ & $\Omega_b h^2$ & $\Omega_c h^2$ & $A_{ps}^{TT}$ \\
+        \midrule
+        $0$  & $0.072$ & $7.20$  & بله & $66.32 \pm 2.42$ & $0.02104 \pm 0.00074$ & $0.1191 \pm 0.0044$ & $74.0 \pm 19.1$ \\
+        $1$  & $0.073$ & $7.20$  & بله & $65.74 \pm 0.06$ & $0.02210 \pm 0.00002$ & $0.1234 \pm 0.0001$ & $55.1 \pm 14.4$ \\
+        $2$  & $0.078$ & $6.85$  & بله & $68.33 \pm 1.90$ & $0.02155 \pm 0.00062$ & $0.1148 \pm 0.0034$ & $74.1 \pm 17.8$ \\
+        $3$  & $0.075$ & $7.51$  & بله & $66.78 \pm 2.29$ & $0.02258 \pm 0.00077$ & $0.1208 \pm 0.0041$ & $40.0 \pm 20.0$ \\
+        $4$  & $0.023$ & $6.55$  & بله & $72.00 \pm 3.53$ & $0.02341 \pm 0.00122$ & $0.1097 \pm 0.0056$ & $59.8 \pm 34.4$ \\
+        $5$  & $0.040$ & $3.42$  & بله & $67.16 \pm 2.51$ & $0.02131 \pm 0.00093$ & $0.1189 \pm 0.0048$ & $80.2 \pm 21.3$ \\
+        $6$  & $0.034$ & $6.62$  & بله & $71.10 \pm 3.19$ & $0.02261 \pm 0.00108$ & $0.1129 \pm 0.0056$ & $79.7 \pm 29.5$ \\
+        $7$  & $0.049$ & $6.56$  & بله & $69.68 \pm 2.31$ & $0.02215 \pm 0.00085$ & $0.1109 \pm 0.0041$ & $63.8 \pm 19.1$ \\
+        $8$  & $0.076$ & $8.28$  & بله & $66.11 \pm 1.72$ & $0.02199 \pm 0.00067$ & $0.1230 \pm 0.0033$ & $62.6 \pm 17.8$ \\
+        $9$  & $0.076$ & $11.39$ & خیر & $71.66 \pm 8.21$ & $0.02284 \pm 0.00091$ & $0.1109 \pm 0.0166$ & $58.5 \pm 22.0$ \\
+        $10$ & $0.073$ & $3.99$  & بله & $66.59 \pm 2.72$ & $0.02162 \pm 0.00075$ & $0.1198 \pm 0.0051$ & $62.5 \pm 17.8$ \\
+        $11$ & $0.070$ & $12.44$ & بله & $67.14 \pm 2.14$ & $0.02205 \pm 0.00069$ & $0.1199 \pm 0.0042$ & $58.6 \pm 16.4$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{../output/patched_bandpowers_TT_fixed(As,ns).png}
+    \caption{طیف‌توان‌های \lr{TT} هر قطعه، $\ell(\ell+1)C_\ell^{TT}/2\pi$.}
+    \label{fig:bandpowers}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{../output/patched_params_TT_fixed(As,ns).png}
+    \caption{پارامترها با بهترین‌ برازش به‌طور مستقل برای هر قطعه،
+    در مقایسه با کیهان‌شناسی مرجع پلانک ۲۰۱۸.}
+    \label{fig:paramsplot}
+\end{figure}
+
+\end{document}

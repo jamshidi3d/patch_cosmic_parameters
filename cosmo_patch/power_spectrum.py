@@ -359,9 +359,18 @@ def compute_joint_tt_te_ee_covariance(
     assumption for this kind of Gaussian covariance forecast -- T and P
     noise come from different linear combinations of detector timelines).
 
-    A single NmtCovarianceWorkspace is reused for all 6 blocks: its
-    coupling coefficients depend only on the fields' masks, and this
-    pipeline uses the same apodized mask for temperature and polarization.
+    Temperature and polarization are allowed to use *different* masks
+    (e.g. Planck's separate common intensity and polarization confidence
+    masks) -- NaMaster's covariance coupling coefficients depend on the
+    masks of all four fields entering a given TT/TE/EE block, so a single
+    shared NmtCovarianceWorkspace is only valid when every field uses the
+    same mask. Each of the 6 blocks below instead gets the coupling
+    coefficients for its own (T or Pol) field combination, matching the
+    field pairing each spectrum was actually built from (TT = T_a x T_b,
+    TE = T_a x Pol_b, EE = Pol_a x Pol_b). Identical field combinations
+    across blocks are cached so nothing is recomputed twice -- if T and
+    Pol happen to share the same mask, this degenerates back to the old
+    single-workspace behavior.
 
     Parameters
     ----------
@@ -398,12 +407,20 @@ def compute_joint_tt_te_ee_covariance(
     cee_auto = [cl_ee + noise_ee, zero, zero, cl_bb]
     cee_cross = [cl_ee, zero, zero, cl_bb]
 
-    cov_workspace = nmt.NmtCovarianceWorkspace()
-    cov_workspace.compute_coupling_coefficients(field_t_a, field_t_b)
+    cw_cache: dict = {}
 
-    def block(spins, cla1b1, cla1b2, cla2b1, cla2b2, wa, wb, n_keep):
+    def coupling(fla, flb, flc, fld):
+        key = (id(fla), id(flb), id(flc), id(fld))
+        cw = cw_cache.get(key)
+        if cw is None:
+            cw = nmt.NmtCovarianceWorkspace()
+            cw.compute_coupling_coefficients(fla, flb, flc, fld)
+            cw_cache[key] = cw
+        return cw
+
+    def block(cw, spins, cla1b1, cla1b2, cla2b1, cla2b2, wa, wb, n_keep):
         cov = nmt.gaussian_covariance(
-            cov_workspace, *spins, cla1b1, cla1b2, cla2b1, cla2b2, wa, wb
+            cw, *spins, cla1b1, cla1b2, cla2b1, cla2b2, wa, wb
         )
         # NaMaster's flattened covariance index is band-major
         # (index = band*ncls + component), *not* component-major --
@@ -418,18 +435,36 @@ def compute_joint_tt_te_ee_covariance(
         same_bin_diag = np.diag(cov[np.ix_(idx_a, idx_b)])
         return same_bin_diag[1:1 + n_keep]  # drop bin 0, keep this pair's overlap
 
-    var_tt = block((0, 0, 0, 0), [ctt_auto], [ctt_cross], [ctt_cross], [ctt_auto],
-                   workspace_tt, workspace_tt, n_tt)
-    cov_tt_te = block((0, 0, 0, 2), [ctt_auto], cte, [ctt_cross], cte,
-                      workspace_tt, workspace_te, min(n_tt, n_te))
-    cov_tt_ee = block((0, 0, 2, 2), cte, cte, cte, cte,
-                      workspace_tt, workspace_ee, min(n_tt, n_ee))
-    var_te = block((0, 2, 0, 2), [ctt_auto], cte, cte, cee_auto,
-                   workspace_te, workspace_te, n_te)
-    cov_te_ee = block((0, 2, 2, 2), cte, cte, cee_cross, cee_auto,
-                      workspace_te, workspace_ee, min(n_te, n_ee))
-    var_ee = block((2, 2, 2, 2), cee_auto, cee_cross, cee_cross, cee_auto,
-                   workspace_ee, workspace_ee, n_ee)
+    var_tt = block(
+        coupling(field_t_a, field_t_b, field_t_a, field_t_b),
+        (0, 0, 0, 0), [ctt_auto], [ctt_cross], [ctt_cross], [ctt_auto],
+        workspace_tt, workspace_tt, n_tt,
+    )
+    cov_tt_te = block(
+        coupling(field_t_a, field_t_b, field_t_a, field_pol_b),
+        (0, 0, 0, 2), [ctt_auto], cte, [ctt_cross], cte,
+        workspace_tt, workspace_te, min(n_tt, n_te),
+    )
+    cov_tt_ee = block(
+        coupling(field_t_a, field_t_b, field_pol_a, field_pol_b),
+        (0, 0, 2, 2), cte, cte, cte, cte,
+        workspace_tt, workspace_ee, min(n_tt, n_ee),
+    )
+    var_te = block(
+        coupling(field_t_a, field_pol_b, field_t_a, field_pol_b),
+        (0, 2, 0, 2), [ctt_auto], cte, cte, cee_auto,
+        workspace_te, workspace_te, n_te,
+    )
+    cov_te_ee = block(
+        coupling(field_t_a, field_pol_b, field_pol_a, field_pol_b),
+        (0, 2, 2, 2), cte, cte, cee_cross, cee_auto,
+        workspace_te, workspace_ee, min(n_te, n_ee),
+    )
+    var_ee = block(
+        coupling(field_pol_a, field_pol_b, field_pol_a, field_pol_b),
+        (2, 2, 2, 2), cee_auto, cee_cross, cee_cross, cee_auto,
+        workspace_ee, workspace_ee, n_ee,
+    )
 
     n_total = n_tt + n_te + n_ee
     cov = np.zeros((n_total, n_total))
