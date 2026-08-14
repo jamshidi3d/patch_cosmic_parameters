@@ -1,0 +1,9 @@
+# Full-sky best-fit parameters (TT+TE+EE, all_varied)
+converged=True  chi2=178.20  n_bins=171
+  H0 = 66.4521 +/- 0.629  (Planck 2018 fiducial: 67.36)
+  ombh2 = 0.0223356 +/- 0.0001673  (Planck 2018 fiducial: 0.02237)
+  omch2 = 0.121862 +/- 0.001416  (Planck 2018 fiducial: 0.12)
+  As = 2.13464e-09 +/- 9.403e-12  (Planck 2018 fiducial: 2.1e-09)
+  ns = 0.963278 +/- 0.004959  (Planck 2018 fiducial: 0.9649)
+  A_ps_TT = 47.4864 +/- 8.516
+  A_ps_EE = 5.16417 +/- 1.36

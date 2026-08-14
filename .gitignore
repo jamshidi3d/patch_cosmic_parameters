@@ -3,5 +3,5 @@
 .vscode
 backup/
 input/
-output/
+reports/
 __pycache__/
