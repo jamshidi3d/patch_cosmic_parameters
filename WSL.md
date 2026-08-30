@@ -239,6 +239,45 @@ long patch loop), use the `nbclient` cell-slicing snippet in the repo README
 
 ---
 
+## 9. Does this affect Windows RAM (games, other software)?
+
+Yes. WSL2 is a real lightweight VM that draws from the **same physical RAM as
+Windows** — it is not a separate pool.
+
+- **`memory=` is a ceiling, not a reservation.** WSL only consumes what the
+  Linux workload actually touches: idle it's a few hundred MB. During
+  Section 2 (covariance) or the Section 4 patch loop it climbs toward the cap,
+  and that RAM is genuinely unavailable to Windows apps while in use.
+- **Release is lazy.** When a job finishes, the `vmmemWSL` process keeps the
+  pages it allocated. `autoMemoryReclaim=gradual` (in the Section 2 config)
+  hands memory back after a few minutes of idle; `wsl --shutdown` from
+  PowerShell frees all of it immediately.
+- **`swap=` lives in a disk file**, so it costs disk space, not RAM — but
+  active swapping is disk I/O that competes with everything else on the
+  machine.
+- **When no WSL distro is running, the impact is zero** — `vmmemWSL`
+  disappears entirely.
+
+### Tips for coexisting with games / heavy apps
+
+- **Don't run the pipeline and a demanding game at the same time.** A 12–16 GB
+  game on top of WSL mid-covariance pushes both into swap and both stutter.
+- **`wsl --shutdown` before launching a game** to reclaim the full amount up
+  front rather than relying on lazy reclaim. If you forget, Windows will take
+  RAM back from WSL under memory pressure — it just arrives as a lag spike.
+- **Set `memory=` low enough to leave your game's footprint free** (e.g. on
+  32 GB, `memory=16GB` if you want ~16 GB headroom). The pipeline still fits
+  in 16 GB with `NSIDE_PATCH=512` and the Section 6 splits.
+- **Keep `autoMemoryReclaim=gradual` and `pageReporting=true` set** so idle
+  WSL doesn't sit on memory you want back.
+- **Run headless + `wsl --shutdown` when done** (Section 7) so a finished run
+  doesn't leave `vmmemWSL` holding gigabytes while you switch to something
+  else.
+- **Check what WSL is holding:** Task Manager → Details → `vmmemWSL`, or
+  PowerShell `Get-Process vmmemWSL`.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -250,3 +289,4 @@ long patch loop), use the `nbclient` cell-slicing snippet in the repo README
 | FITS load in Section 1 is very slow | Copy `input/` onto the Linux fs (`~/…`) instead of reading over `/mnt/f` (Section 4). |
 | A rerun is much slower than an earlier identical one | Orphan kernel from a prior timeout: `ps aux | grep ipykernel`, then `pkill -f ipykernel`. |
 | `free -h` shows the old limits after editing `.wslconfig` | The file must be at `C:\Users\<you>\.wslconfig` (not inside WSL), and you must `wsl --shutdown` (close all WSL terminals first). |
+| A game / other app is starved of RAM while WSL is idle | `vmmemWSL` holding pages from an earlier run — `wsl --shutdown`, or wait for `autoMemoryReclaim=gradual`; lower `memory=` so the ceiling leaves room (Section 9). |
