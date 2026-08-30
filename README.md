@@ -3,8 +3,14 @@
 This is a hands-on guide to the `cosmo_patch` package and the two
 end-to-end notebooks built on it. For a narrative writeup of what the
 notebooks measured and how those results compare to the literature, see
-[REPORT.md](REPORT.md). For a quick architectural overview, see
-[README.md](README.md).
+[REPORT.md](REPORT.md).
+
+To run the joint pipeline somewhere other than a ready Linux box:
+- [COLAB.md](COLAB.md) -- step-by-step for Google Colab (uses
+  `patch_cosmology_fit_colab.ipynb`: conda bootstrap, repo clone, and
+  automatic download of the Planck inputs).
+- [WSL.md](WSL.md) -- running natively on Windows via WSL2, with RAM
+  management for the covariance and 12-patch steps.
 
 ## 1. Setup
 
@@ -95,7 +101,8 @@ Two notebooks live at the project root:
   H0-Ωch²-ns degeneracies), which without the `initial_step` hint below can send
   MIGRAD into a slow negative-curvature recovery search.
 
-Open either in Jupyter and run top to bottom, or execute headlessly:
+Open either in Jupyter and run top to bottom, or execute headlessly
+(for Colab or WSL, see [COLAB.md](COLAB.md) / [WSL.md](WSL.md)):
 
 ```python
 import nbformat
