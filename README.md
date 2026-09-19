@@ -80,7 +80,7 @@ know about cosmological parameters, `fitting` doesn't know about masks
 | `decouple_theory(workspace, cl_theory)` | push a **list** of theory `Cl` arrays through the same mode-coupling workspace used for the data, so they land on the same bandpowers. `cl_theory` must match the workspace's own spin combination -- `[cl_tt]` for spin0×spin0, `[cl_te, cl_tb]` for spin0×spin2, `[cl_ee, cl_eb, cl_be, cl_bb]` for spin2×spin2 |
 | `FitData` / `chi_square(data, H0, ombh2, omch2, As, ns, A_ps_TT, A_ps_EE)` / `fit_parameters(...)` | the **joint TT+TE+EE** fit path: dataclass bundling data + covariance + all 3 workspaces, its chi^2, and the iminuit runner |
 | `FitDataTT` / `chi_square_tt(data, H0, ombh2, omch2, As, ns, A_ps_TT)` / `fit_parameters_tt(...)` | the **TT-only** fit path -- a separate, self-contained set of functions (not the joint ones with TE/EE left empty): one workspace, no TE/EE terms, no `A_ps_EE` |
-| `fit_parameters`/`fit_parameters_tt(data, initial_guess, bounds=None, fixed=None, initial_step=None, compute_minos=False)` | runs iminuit MIGRAD+HESSE (MINOS opt-in, see below), returns best-fit values, errors, chi^2, convergence flag, and the raw `Minuit` object |
+| `fit_parameters`/`fit_parameters_tt(data, initial_guess, bounds=None, fixed=None, initial_step=None, compute_minos=False, n_starts=6, seed=0, force_multistart=False)` | runs iminuit MIGRAD+HESSE (MINOS opt-in, see below), returns best-fit values, errors, chi^2, and the raw `Minuit` object, plus a `status` (`"ok"`/`"recovered"`/`"unresolved"`), `params_at_limit`, `n_starts_tried`, and `chi2_spread` -- an unreliable fit (not just non-converged, see "Known sharp edges" below) is automatically rescued with a multi-start search |
 
 ## 3. Running the notebooks
 
@@ -222,3 +222,25 @@ again in a modified pipeline.
   whatever you run next. If a rerun is inexplicably slower than a nearly
   identical previous run, check `ps aux | grep ipykernel` before assuming
   the code itself regressed.
+- **A "converged" fit can still be wrong: a parameter pinned at its bound
+  with a suspiciously tiny HESSE error.** HESSE's parabolic-error
+  assumption is invalid right at a boundary, so a bound-pinned parameter
+  can come back looking artificially precise even when `m.valid` is
+  `True`. Empirically, three of the 12 TT-only patches came back
+  `converged=False`, and one of those (`A_ps_TT` pinned at its upper bound
+  of 200) reported `+/- 7.6e-05` -- clearly fake. `fit_parameters`/
+  `fit_parameters_tt` now check more than `m.valid` (accurate/posdef
+  covariance, HESSE success, EDM, and which parameters sit at a bound --
+  see `_fmin_diagnostics`/`_is_unreliable` in `fitting.py`), and when a fit
+  looks unreliable they rescue it with a genuine multi-start search spread
+  across the *whole* bounded parameter space (`_diverse_starts`, a manual
+  Latin Hypercube) rather than a cheap local retry -- a fit stuck at a
+  bound or in a local minimum usually hasn't explored the rest of the
+  space. The result dict gains `status` (`"ok"`/`"recovered"`/
+  `"unresolved"`), `params_at_limit`, `n_starts_tried`, and `chi2_spread`.
+  This only escalates when Minuit's own diagnostics flag trouble, so a
+  well-behaved fit still costs exactly one MIGRAD+HESSE pass; it can *not*
+  catch MIGRAD converging "cleanly" to an untagged local minimum -- no
+  flag-based check can, only actually searching elsewhere can -- for that,
+  pass `force_multistart=True` to always run the search (at full
+  multi-start cost on every fit).

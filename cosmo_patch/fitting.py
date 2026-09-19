@@ -156,6 +156,228 @@ def decouple_theory(workspace, cl_theory: list[np.ndarray]) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# 2b. Shared Minuit-running machinery, with multi-start recovery for a fit
+#     that lands in a local minimum or pins a parameter at its bound
+#     without ever exploring the rest of the bounded parameter space.
+#     Used by both fit_parameters (joint) and fit_parameters_tt (TT-only)
+#     below -- the chi^2 definitions stay separate (see module docstring),
+#     only the "build a Minuit, run it, decide whether to trust it"
+#     plumbing is shared, the same spirit as the shared camb_cl /
+#     decouple_theory / point_source_dl_template above.
+# ---------------------------------------------------------------------------
+
+def _fmin_diagnostics(m: Minuit) -> dict:
+    """
+    Pull the iminuit FunctionMinimum flags that distinguish a trustworthy
+    MIGRAD+HESSE result from one that only looks converged. `m.valid`
+    alone misses cases like a parameter pinned at its bound with a
+    suspiciously tiny HESSE error -- HESSE's parabolic-error assumption is
+    invalid right at a boundary, so a "valid" fit can still report a fake
+    precision there.
+
+    Returns
+    -------
+    dict with keys 'valid', 'accurate_covar', 'posdef_covar',
+    'hesse_failed', 'call_limit', 'above_max_edm', and 'params_at_limit'
+    (the free parameter names sitting at one of their `limits`, to within
+    a relative tolerance -- `m.fmin.has_parameters_at_limit` only says
+    *whether*, not *which*).
+    """
+    fmin = m.fmin
+    params_at_limit = []
+    for p in m.parameters:
+        if m.fixed[p]:
+            continue
+        lo, hi = m.limits[p]
+        val = m.values[p]
+        scale = (hi - lo) if (np.isfinite(lo) and np.isfinite(hi)) else max(abs(val), 1.0)
+        tol = 1e-6 * max(scale, 1e-12)
+        if np.isfinite(lo) and abs(val - lo) < tol:
+            params_at_limit.append(p)
+        elif np.isfinite(hi) and abs(val - hi) < tol:
+            params_at_limit.append(p)
+    return {
+        "valid": fmin.is_valid,
+        "accurate_covar": fmin.has_accurate_covar,
+        "posdef_covar": fmin.has_posdef_covar,
+        "hesse_failed": fmin.hesse_failed,
+        "call_limit": fmin.has_reached_call_limit,
+        "above_max_edm": fmin.is_above_max_edm,
+        "params_at_limit": params_at_limit,
+    }
+
+
+def _is_unreliable(m: Minuit) -> bool:
+    """
+    True if this fit shouldn't be trusted as-is: MIGRAD didn't converge,
+    the covariance is inaccurate or not positive-definite (so HESSE errors
+    are meaningless), HESSE itself failed, MIGRAD hit its call limit, the
+    EDM is still above tolerance, or a free parameter is sitting at its
+    bound (where HESSE's parabolic assumption breaks down).
+    """
+    d = _fmin_diagnostics(m)
+    return (
+        not d["valid"]
+        or not d["accurate_covar"]
+        or not d["posdef_covar"]
+        or d["hesse_failed"]
+        or d["call_limit"]
+        or d["above_max_edm"]
+        or bool(d["params_at_limit"])
+    )
+
+
+def _diverse_starts(
+    initial_guess: dict,
+    bounds: dict | None,
+    fixed: set | None,
+    n_starts: int,
+    seed: int,
+) -> list[dict]:
+    """
+    Build n_starts initial-guess dicts spanning the bounded parameter
+    space, to rescue a fit that has landed in a local minimum or at a
+    bound without ever exploring the rest of the space -- a small jitter
+    around the original guess doesn't reliably fix that, so this
+    stratifies each free, bounded parameter's *entire* range into
+    n_starts bins (a manual Latin Hypercube: independently permute the
+    bin order per parameter, no new dependency) and draws one point per
+    bin.
+
+    Start 0 is always `initial_guess` unchanged, so it's never wasted. A
+    parameter with no entry in `bounds` (nothing to span) or that is in
+    `fixed` keeps its initial_guess value in every start.
+    """
+    fixed = fixed or set()
+    bounds = bounds or {}
+    rng = np.random.default_rng(seed)
+
+    spannable = [p for p in initial_guess if p in bounds and p not in fixed]
+    perms = {p: rng.permutation(n_starts) for p in spannable}
+
+    starts = [dict(initial_guess)]
+    for k in range(1, n_starts):
+        guess = dict(initial_guess)
+        for p in spannable:
+            lo, hi = bounds[p]
+            frac = (perms[p][k] + rng.uniform()) / n_starts
+            guess[p] = lo + frac * (hi - lo)
+        starts.append(guess)
+    return starts
+
+
+def _run_once(
+    cost_fn,
+    guess: dict,
+    bounds: dict | None,
+    fixed: set | None,
+    initial_step: dict | None,
+    use_simplex: bool = False,
+) -> Minuit:
+    """
+    Build one Minuit instance at `guess` and run SIMPLEX (optional) +
+    MIGRAD + HESSE. Shared by fit_parameters and fit_parameters_tt -- the
+    only thing that differs between the two fit paths is `cost_fn` itself.
+
+    use_simplex : bool
+        Run derivative-free SIMPLEX before MIGRAD. Only worth the extra
+        cost for a diverse/far-from-optimum start (see _diverse_starts) --
+        a random start point is much more likely to hand MIGRAD's
+        numerical gradient a poorly conditioned first step than the
+        original, physically motivated guess is.
+    """
+    m = Minuit(cost_fn, **guess)
+    m.errordef = Minuit.LEAST_SQUARES  # chi^2 convention: errordef = 1
+
+    if bounds:
+        for name, (lo, hi) in bounds.items():
+            m.limits[name] = (lo, hi)
+    if initial_step:
+        for name, step in initial_step.items():
+            m.errors[name] = step
+    if fixed:
+        for name in fixed:
+            m.fixed[name] = True
+
+    if use_simplex:
+        m.simplex()
+    m.migrad()
+    m.hesse()
+    return m
+
+
+def _fit_with_recovery(
+    cost_fn,
+    initial_guess: dict,
+    bounds: dict | None,
+    fixed: set | None,
+    initial_step: dict | None,
+    n_starts: int,
+    seed: int,
+    force_multistart: bool = False,
+) -> dict:
+    """
+    Run cost_fn's MIGRAD+HESSE fit at `initial_guess`; if the result looks
+    unreliable (see _is_unreliable), rescue it with a genuine multi-start
+    search over the bounded parameter space rather than a cheap local
+    retry -- a fit stuck at a bound or in a local minimum usually hasn't
+    explored the rest of the space, so restarting from the same point (or
+    a small jitter of it) doesn't reliably fix it.
+
+    Caveat this does *not* cover: MIGRAD can converge "cleanly" -- valid,
+    accurate positive-definite covariance, no parameter at a bound -- to a
+    local minimum that just happens to have none of those tells (e.g. a
+    narrow decoy dip well inside the bounds). No flag-based check can catch
+    that; only actually searching elsewhere can. That's what
+    `force_multistart=True` is for: it runs the same diverse-start search
+    unconditionally, even when `initial_guess` alone already looks fine,
+    at the cost of paying for every extra start every time. Off by default
+    (the flag-triggered path already fixes every failure mode actually
+    observed in this pipeline's output -- see fitting.py's module notes);
+    turn it on for a final, paranoid production run rather than routine
+    iteration.
+
+    Returns a dict with keys 'minuit', 'status' ('ok'/'recovered'/
+    'unresolved'), 'n_starts_tried', 'params_at_limit', 'chi2_spread'.
+    """
+    m0 = _run_once(cost_fn, initial_guess, bounds, fixed, initial_step)
+    if not force_multistart and not _is_unreliable(m0):
+        return {
+            "minuit": m0,
+            "status": "ok",
+            "n_starts_tried": 1,
+            "params_at_limit": [],
+            "chi2_spread": 0.0,
+        }
+
+    starts = _diverse_starts(initial_guess, bounds, fixed, n_starts, seed)
+    candidates = [m0]  # start 0 (== initial_guess) already run above
+    for guess in starts[1:]:
+        candidates.append(
+            _run_once(cost_fn, guess, bounds, fixed, initial_step, use_simplex=True)
+        )
+
+    fvals = [m.fval for m in candidates]
+    chi2_spread = max(fvals) - min(fvals)
+
+    reliable = [m for m in candidates if not _is_unreliable(m)]
+    if reliable:
+        winner = min(reliable, key=lambda m: m.fval)
+        status = "ok" if (winner is m0 and not _is_unreliable(m0)) else "recovered"
+    else:
+        winner = min(candidates, key=lambda m: m.fval)
+        status = "unresolved"
+
+    return {
+        "minuit": winner,
+        "status": status,
+        "n_starts_tried": len(candidates),
+        "params_at_limit": _fmin_diagnostics(winner)["params_at_limit"],
+        "chi2_spread": chi2_spread,
+    }
+
+
+# ---------------------------------------------------------------------------
 # 3. chi^2 and the fit
 # ---------------------------------------------------------------------------
 
@@ -230,6 +452,9 @@ def fit_parameters(
     fixed: set | None = None,
     initial_step: dict | None = None,
     compute_minos: bool = False,
+    n_starts: int = 6,
+    seed: int = 0,
+    force_multistart: bool = False,
 ) -> dict:
     """
     Run the chi^2 minimization with iminuit.
@@ -264,14 +489,45 @@ def fit_parameters(
          way. Worth setting whenever a fit is unexpectedly slow.
     compute_minos : bool
         Also run MINOS (asymmetric profile-likelihood errors) for every
-        free parameter. Off by default: MINOS runs a separate bisection
-        search *per parameter* on top of MIGRAD+HESSE, each step another
-        full chi_square (CAMB) evaluation -- for a chi_square this
-        expensive (a full Boltzmann solve per call), this easily becomes
-        the dominant cost of the whole fit, sometimes by an order of
-        magnitude, for marginal benefit if all you're reading is the
-        symmetric `errors` dict. Turn on only if you specifically want
-        `result["minos"]`'s asymmetric error bars.
+        free parameter, on the final (possibly rescued) best fit. Off by
+        default: MINOS runs a separate bisection search *per parameter* on
+        top of MIGRAD+HESSE, each step another full chi_square (CAMB)
+        evaluation -- for a chi_square this expensive (a full Boltzmann
+        solve per call), this easily becomes the dominant cost of the
+        whole fit, sometimes by an order of magnitude, for marginal
+        benefit if all you're reading is the symmetric `errors` dict. Turn
+        on only if you specifically want `result["minos"]`'s asymmetric
+        error bars.
+    n_starts : int
+        Number of starting points to try if the fit at `initial_guess`
+        looks unreliable (not valid, an inaccurate/non-positive-definite
+        covariance, HESSE failure, MIGRAD hitting its call limit, EDM
+        above tolerance, or a free parameter pinned at its bound -- see
+        `_is_unreliable`). The rescue starts are spread across the *whole*
+        bounded parameter space (a manual Latin Hypercube), not jittered
+        near `initial_guess` -- a fit stuck at a bound or in a local
+        minimum usually hasn't explored the rest of the space, so a local
+        retry doesn't reliably help. Only paid when needed: a well-behaved
+        fit costs exactly one MIGRAD+HESSE pass, same as before. Each
+        rescue candidate re-pays a full SIMPLEX+MIGRAD+HESSE pass -- with
+        CAMB's ~1-1.5s per chi^2 call, a rescued patch can take several
+        minutes longer; tune this down while iterating, up for a final
+        run.
+    seed : int
+        RNG seed for the rescue starting points, for reproducibility.
+    force_multistart : bool
+        Always run the full diverse-start search, even when the fit at
+        `initial_guess` already looks reliable by every Minuit diagnostic
+        (valid, accurate positive-definite covariance, nothing at a
+        bound). Off by default: those diagnostics catch every failure mode
+        actually seen in this pipeline's output (a non-converged fit, or a
+        parameter pinned at its bound with a fake tiny error). What they
+        *can't* catch is MIGRAD converging "cleanly" to a local minimum
+        that happens to trip none of those flags -- no flag-based check
+        can, only actually searching elsewhere can. Set this to True for a
+        final, paranoid production run where you want that extra
+        assurance and are willing to pay full multi-start cost on every
+        fit, not just routine iteration.
 
     Returns
     -------
@@ -283,27 +539,30 @@ def fit_parameters(
         'chi2'      : chi^2 at the best fit
         'valid'     : whether MIGRAD converged
         'minuit'    : the raw Minuit object, for further inspection/plots
+        'status'    : 'ok' (converged first try), 'recovered' (a
+                      multi-start rescue found a reliable minimum), or
+                      'unresolved' (no candidate, including the rescue
+                      starts, looked reliable -- treat best_fit/errors as
+                      approximate, and check params_at_limit)
+        'n_starts_tried'  : how many starting points were actually run
+        'params_at_limit' : free parameters sitting at a bound in the
+                      returned best_fit -- their HESSE errors are not
+                      meaningful there (HESSE's parabolic assumption fails
+                      at a boundary)
+        'chi2_spread'     : max - min chi^2 across every starting point
+                      tried (0.0 if only one was run); small means every
+                      explored region agrees, large means the returned
+                      minimum is still worth a manual look even if
+                      status == 'recovered'
     """
     def neg_log_like(H0, ombh2, omch2, As, ns, A_ps_TT, A_ps_EE):
         return chi_square(data, H0, ombh2, omch2, As, ns, A_ps_TT, A_ps_EE)
 
-    m = Minuit(neg_log_like, **initial_guess)
-    m.errordef = Minuit.LEAST_SQUARES  # chi^2 convention: errordef = 1
-
-    if bounds:
-        for name, (lo, hi) in bounds.items():
-            m.limits[name] = (lo, hi)
-
-    if initial_step:
-        for name, step in initial_step.items():
-            m.errors[name] = step
-
-    if fixed:
-        for name in fixed:
-            m.fixed[name] = True
-
-    m.migrad()
-    m.hesse()
+    outcome = _fit_with_recovery(
+        neg_log_like, initial_guess, bounds, fixed, initial_step, n_starts, seed,
+        force_multistart=force_multistart,
+    )
+    m = outcome["minuit"]
 
     minos_errors = None
     if compute_minos:
@@ -326,6 +585,10 @@ def fit_parameters(
         "chi2": m.fval,
         "valid": m.valid,
         "minuit": m,
+        "status": outcome["status"],
+        "n_starts_tried": outcome["n_starts_tried"],
+        "params_at_limit": outcome["params_at_limit"],
+        "chi2_spread": outcome["chi2_spread"],
     }
 
 
@@ -392,12 +655,19 @@ def fit_parameters_tt(
     fixed: set | None = None,
     initial_step: dict | None = None,
     compute_minos: bool = False,
+    n_starts: int = 6,
+    seed: int = 0,
+    force_multistart: bool = False,
 ) -> dict:
     """
     Run the TT-only chi^2 minimization with iminuit. Same machinery and
-    caveats as fit_parameters (see its docstring for `initial_step` and
-    `compute_minos`), specialized to chi_square_tt's 6 parameters (no
-    A_ps_EE).
+    caveats as fit_parameters (see its docstring for `initial_step`,
+    `compute_minos`, `n_starts`, `seed`, and the extra 'status'/
+    'params_at_limit'/'chi2_spread' return keys), specialized to
+    chi_square_tt's 6 parameters (no A_ps_EE). TT alone has a weaker, more
+    degenerate likelihood than the joint fit (no TE/EE to break the usual
+    H0-omch2-ns degeneracies), so it's noticeably more prone to needing the
+    multi-start rescue.
 
     Parameters
     ----------
@@ -405,7 +675,8 @@ def fit_parameters_tt(
     initial_guess : dict
         e.g. {"H0": 67.0, "ombh2": 0.0224, "omch2": 0.12, "As": 2.1e-9,
               "ns": 0.965, "A_ps_TT": 50.0}
-    bounds, fixed, initial_step, compute_minos : see fit_parameters
+    bounds, fixed, initial_step, compute_minos, n_starts, seed,
+        force_multistart : see fit_parameters
 
     Returns
     -------
@@ -414,23 +685,11 @@ def fit_parameters_tt(
     def neg_log_like(H0, ombh2, omch2, As, ns, A_ps_TT):
         return chi_square_tt(data, H0, ombh2, omch2, As, ns, A_ps_TT)
 
-    m = Minuit(neg_log_like, **initial_guess)
-    m.errordef = Minuit.LEAST_SQUARES  # chi^2 convention: errordef = 1
-
-    if bounds:
-        for name, (lo, hi) in bounds.items():
-            m.limits[name] = (lo, hi)
-
-    if initial_step:
-        for name, step in initial_step.items():
-            m.errors[name] = step
-
-    if fixed:
-        for name in fixed:
-            m.fixed[name] = True
-
-    m.migrad()
-    m.hesse()
+    outcome = _fit_with_recovery(
+        neg_log_like, initial_guess, bounds, fixed, initial_step, n_starts, seed,
+        force_multistart=force_multistart,
+    )
+    m = outcome["minuit"]
 
     minos_errors = None
     if compute_minos:
@@ -450,4 +709,8 @@ def fit_parameters_tt(
         "chi2": m.fval,
         "valid": m.valid,
         "minuit": m,
+        "status": outcome["status"],
+        "n_starts_tried": outcome["n_starts_tried"],
+        "params_at_limit": outcome["params_at_limit"],
+        "chi2_spread": outcome["chi2_spread"],
     }

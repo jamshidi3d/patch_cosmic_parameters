@@ -112,25 +112,26 @@ def build_field(
 
 def compute_power_spectrum(
     field_a: "nmt.NmtField",
+    field_b: "nmt.NmtField",
     bins: "nmt.NmtBin",
-    field_b: "nmt.NmtField | None" = None,
     workspace: "nmt.NmtWorkspace | None" = None,
 ) -> dict:
     """
-    Compute the mode-decoupled pseudo-Cl bandpowers for a field, or the
-    cross-spectrum between two fields sharing the same mask/footprint.
+    Compute the mode-decoupled pseudo-Cl bandpowers for the cross-spectrum
+    of two fields sharing the same mask/footprint (or the auto-spectrum,
+    if field_b is field_a).
 
     Parameters
     ----------
     field_a : nmt.NmtField
         From build_field().
-    bins : nmt.NmtBin
-        From make_bins().
-    field_b : nmt.NmtField, optional
+    field_b : nmt.NmtField
         A second field (e.g. an independent split/half-mission map) to
         cross-correlate with field_a. Cross-correlating two noise-independent
         splits cancels the noise bias that an auto-spectrum would carry.
-        If None, computes the auto-spectrum of field_a with itself.
+        Pass field_a again to compute its auto-spectrum instead.
+    bins : nmt.NmtBin
+        From make_bins().
     workspace : nmt.NmtWorkspace, optional
         Precomputed workspace (mode-coupling matrix). If None, one is built
         here -- this is the slow step (O(lmax^3)), so reuse it across calls
@@ -145,9 +146,6 @@ def compute_power_spectrum(
                       e.g. to push theory spectra through the same coupling
                       in fitting.py)
     """
-    if field_b is None:
-        field_b = field_a
-
     if workspace is None:
         workspace = nmt.NmtWorkspace()
         workspace.compute_coupling_matrix(field_a, field_b, bins)

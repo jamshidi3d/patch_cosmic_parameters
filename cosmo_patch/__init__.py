@@ -11,7 +11,7 @@ Typical usage
 
     field = power_spectrum.build_field(p)
     bins = power_spectrum.make_bins(p["nside"], bandpower_width=20)
-    spec = power_spectrum.compute_power_spectrum(field, bins)
+    spec = power_spectrum.compute_power_spectrum(field, field, bins)  # auto-spectrum
 
     cov = power_spectrum.compute_gaussian_covariance(spec["workspace"], field, fiducial_cl)
     errors = power_spectrum.compute_errors(cov)
