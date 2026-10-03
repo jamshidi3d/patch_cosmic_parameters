@@ -32,6 +32,9 @@ import numpy as np
 import camb
 from iminuit import Minuit
 
+from . import patch as _patch
+from . import power_spectrum as _power_spectrum
+
 
 # ---------------------------------------------------------------------------
 # 1. Theory: parameters -> CAMB Cl
@@ -714,3 +717,238 @@ def fit_parameters_tt(
         "params_at_limit": outcome["params_at_limit"],
         "chi2_spread": outcome["chi2_spread"],
     }
+
+
+# ---------------------------------------------------------------------------
+# 5. One-patch end-to-end pipeline: maps + masks -> spectra -> covariance
+#    -> joint TT+TE+EE fit
+# ---------------------------------------------------------------------------
+
+def n_bins_upto(lmax_cut: int, bandpower_width: int = 30, ell_start: int = 2) -> int:
+    """
+    Bandpowers kept per spectrum after dropping bin 0: a linear
+    `bandpower_width` binning starting at `ell_start` gives
+    (lmax_cut - ell_start + 1) // bandpower_width bins covering
+    ell=[ell_start, lmax_cut] -- minus 1 for the dropped first bin.
+    """
+    return (lmax_cut - ell_start + 1) // bandpower_width - 1
+
+
+def fit_one_patch(
+    maps_hm1,
+    maps_hm2,
+    mask_t,
+    mask_pol,
+    nside: int,
+    lmax_tt: int,
+    lmax_te: int,
+    lmax_ee: int,
+    bandpower_width: int,
+    beam_function: np.ndarray,
+    pixel_window_t: np.ndarray,
+    pixel_window_pol: np.ndarray,
+    cl_fiducial: dict,
+    initial_guess: dict,
+    bounds: dict | None = None,
+    fixed: set | None = None,
+    max_cov_cond: float = 1e12,
+    **fit_kwargs,
+) -> dict:
+    """
+    Full TT+TE+EE pipeline on one sky region: hm1 x hm2 cross-spectra with
+    their own mode-coupling workspaces, the joint Gaussian covariance, and
+    the chi^2 fit.
+
+    Parameters
+    ----------
+    maps_hm1, maps_hm2 : (T, Q, U) sequences of HEALPix maps at `nside`
+        The two half-mission maps (independent noise), uK. The region is
+        selected by the masks, not by the maps, so pass full-sky maps.
+    mask_t, mask_pol : ndarray
+        Apodized region masks for temperature and polarization (e.g. a
+        superpixel mask x survey mask).
+    nside : int
+        Resolution of the maps/masks.
+    lmax_tt, lmax_te, lmax_ee : int
+        Per-spectrum multipole cuts. The shared field/CAMB lmax is
+        max(lmax_tt, lmax_te, lmax_ee); `beam_function` and both pixel
+        windows must reach at least that far.
+    bandpower_width : int
+    beam_function, pixel_window_t, pixel_window_pol : ndarray
+    cl_fiducial : dict
+        CAMB spectra ("TT", "TE", "EE", "BB") from `camb_cl`, for the
+        analytic covariance; must reach the shared lmax.
+    initial_guess, bounds, fixed, **fit_kwargs
+        Forwarded to `fit_parameters`.
+    max_cov_cond : float
+        A covariance more ill-conditioned than this raises RuntimeError
+        instead of being inverted into numerical garbage.
+
+    Returns
+    -------
+    dict with keys 'f_sky_t', 'f_sky_pol', 'ell', 'cl_data', 'errors'
+    (the stacked TT,TE,EE error vector), 'error_slices', 'result' (the
+    `fit_parameters` return value) and 'fit_data' (the FitData).
+    """
+    lmax = max(lmax_tt, lmax_te, lmax_ee)
+    map_t_hm1, map_q_hm1, map_u_hm1 = maps_hm1
+    map_t_hm2, map_q_hm2, map_u_hm2 = maps_hm2
+
+    p_t_hm1 = _patch.extract_patch(map_t_hm1, mask_t)
+    p_t_hm2 = _patch.extract_patch(map_t_hm2, mask_t)
+    p_pol_hm1 = _patch.extract_patch(np.array([map_q_hm1, map_u_hm1]), mask_pol)
+    p_pol_hm2 = _patch.extract_patch(np.array([map_q_hm2, map_u_hm2]), mask_pol)
+
+    def build(p, spin, pixel_window):
+        return _power_spectrum.build_field(
+            p, spin=spin, beam_function=beam_function,
+            pixel_window_function=pixel_window, lmax=lmax,
+        )
+
+    field_t_hm1 = build(p_t_hm1, 0, pixel_window_t)
+    field_t_hm2 = build(p_t_hm2, 0, pixel_window_t)
+    field_pol_hm1 = build(p_pol_hm1, 2, pixel_window_pol)
+    field_pol_hm2 = build(p_pol_hm2, 2, pixel_window_pol)
+
+    bins = _power_spectrum.make_bins(nside, bandpower_width=bandpower_width, lmax=lmax)
+
+    spec_tt = _power_spectrum.compute_power_spectrum(field_t_hm1, field_t_hm2, bins)
+    spec_te = _power_spectrum.compute_power_spectrum(field_t_hm1, field_pol_hm2, bins)
+    spec_ee = _power_spectrum.compute_power_spectrum(field_pol_hm1, field_pol_hm2, bins)
+    ws_tt, ws_te, ws_ee = spec_tt["workspace"], spec_te["workspace"], spec_ee["workspace"]
+
+    n_tt = n_bins_upto(lmax_tt, bandpower_width)
+    n_te = n_bins_upto(lmax_te, bandpower_width)
+    n_ee = n_bins_upto(lmax_ee, bandpower_width)
+
+    ell = {
+        "TT": spec_tt["ell"][1:1 + n_tt],
+        "TE": spec_te["ell"][1:1 + n_te],
+        "EE": spec_ee["ell"][1:1 + n_ee],
+    }
+    cl = {
+        "TT": spec_tt["cl"][1:1 + n_tt],
+        "TE": spec_te["cl"][1:1 + n_te],
+        "EE": spec_ee["cl"][1:1 + n_ee],
+    }
+    cl_data = np.concatenate([cl["TT"], cl["TE"], cl["EE"]])
+
+    # Noise level of each half-mission split, for the covariance (see
+    # power_spectrum.estimate_noise_cl).
+    noise_tt = _power_spectrum.estimate_noise_cl(
+        map_t_hm1, map_t_hm2, mask_t, lmax,
+        beam_function=beam_function, pixel_window_function=pixel_window_t, spin=0,
+    )
+    noise_ee = _power_spectrum.estimate_noise_cl(
+        [map_q_hm1, map_u_hm1], [map_q_hm2, map_u_hm2], mask_pol, lmax,
+        beam_function=beam_function, pixel_window_function=pixel_window_pol, spin=2,
+    )
+
+    cov = _power_spectrum.compute_joint_tt_te_ee_covariance(
+        ws_tt, ws_te, ws_ee,
+        field_t_hm1, field_t_hm2, field_pol_hm1, field_pol_hm2,
+        cl_fiducial["TT"], cl_fiducial["TE"], cl_fiducial["EE"], cl_fiducial["BB"],
+        noise_tt, noise_ee,
+        n_tt, n_te, n_ee,
+    )
+    errors = _power_spectrum.compute_errors(cov)
+
+    # A near-singular covariance (small f_sky, few independent modes) would
+    # otherwise silently invert into numerical garbage that poisons the fit
+    # without raising -- fail loudly so callers can record the region as failed.
+    cond = np.linalg.cond(cov)
+    if cond > max_cov_cond:
+        raise RuntimeError(f"ill-conditioned covariance (cond={cond:.2e})")
+    cov_inv = np.linalg.inv(cov)
+
+    fit_data = FitData(
+        cl_data=cl_data, cov_inv=cov_inv,
+        workspace_tt=ws_tt, workspace_te=ws_te, workspace_ee=ws_ee,
+        lmax=lmax, n_tt=n_tt, n_te=n_te, n_ee=n_ee,
+    )
+    result = fit_parameters(fit_data, initial_guess, bounds, fixed=fixed, **fit_kwargs)
+
+    return dict(
+        f_sky_t=p_t_hm1["f_sky"], f_sky_pol=p_pol_hm1["f_sky"],
+        ell=ell, cl_data=cl, errors=errors,
+        error_slices={
+            "TT": slice(0, n_tt),
+            "TE": slice(n_tt, n_tt + n_te),
+            "EE": slice(n_tt + n_te, n_tt + n_te + n_ee),
+        },
+        result=result,
+        fit_data=fit_data,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. Per-patch result cache -- lets an interrupted multi-patch run resume
+# ---------------------------------------------------------------------------
+
+def save_patch_result(path: str, patch_result: dict, config: dict) -> None:
+    """
+    Write a `fit_one_patch` result to `path` as JSON, together with the
+    `config` dict it was computed under (see `load_patch_result`).
+
+    Not saved: the raw Minuit object and the FitData (NaMaster workspaces),
+    which can't be serialized to JSON -- a result reloaded from disk has
+    'fit_data' = None and no result['minuit'].
+    """
+    import json
+
+    res = patch_result["result"]
+    payload = {
+        "config": config,
+        "f_sky_t": float(patch_result["f_sky_t"]),
+        "f_sky_pol": float(patch_result["f_sky_pol"]),
+        "ell": {k: np.asarray(v).tolist() for k, v in patch_result["ell"].items()},
+        "cl_data": {k: np.asarray(v).tolist() for k, v in patch_result["cl_data"].items()},
+        "errors": np.asarray(patch_result["errors"]).tolist(),
+        "error_slices": {k: [s.start, s.stop] for k, s in patch_result["error_slices"].items()},
+        "result": {
+            "best_fit": {k: float(v) for k, v in res["best_fit"].items()},
+            "errors": {k: float(v) for k, v in res["errors"].items()},
+            "chi2": float(res["chi2"]),
+            "valid": bool(res["valid"]),
+            "status": res["status"],
+            "n_starts_tried": int(res["n_starts_tried"]),
+            "params_at_limit": list(res["params_at_limit"]),
+            "chi2_spread": float(res["chi2_spread"]),
+        },
+    }
+    tmp = path + ".tmp"  # write-then-rename: a crash mid-write can't leave a corrupt cache file
+    with open(tmp, "w") as f:
+        json.dump(payload, f)
+    import os
+    os.replace(tmp, path)
+
+
+def load_patch_result(path: str, config: dict) -> dict | None:
+    """
+    Load a result saved by `save_patch_result`, or None if `path` doesn't
+    exist, is unreadable (e.g. a run killed mid-write), or was computed
+    under a different `config` (so a changed lmax / binning / initial guess
+    / bounds recomputes rather than silently reusing stale results).
+    """
+    import json
+    import os
+
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if d.get("config") != json.loads(json.dumps(config)):
+        return None
+
+    return dict(
+        f_sky_t=d["f_sky_t"], f_sky_pol=d["f_sky_pol"],
+        ell={k: np.array(v) for k, v in d["ell"].items()},
+        cl_data={k: np.array(v) for k, v in d["cl_data"].items()},
+        errors=np.array(d["errors"]),
+        error_slices={k: slice(*v) for k, v in d["error_slices"].items()},
+        result=d["result"],
+        fit_data=None,
+    )
