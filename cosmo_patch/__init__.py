@@ -16,12 +16,16 @@ Typical usage
     cov = power_spectrum.compute_gaussian_covariance(spec["workspace"], field, fiducial_cl)
     errors = power_spectrum.compute_errors(cov)
 
-    data = fitting.FitData(ell=spec["ell"], cl_data=spec["cl"],
-                            cov_inv=np.linalg.inv(cov),
-                            workspace=spec["workspace"], lmax=3*p["nside"]-1)
-    result = fitting.fit_parameters(data, initial_guess={...}, bounds={...})
+    data = fitting.FitDataTT(cl_data=spec["cl"][1:], cov_inv=np.linalg.inv(cov[1:, 1:]),
+                             workspace_tt=spec["workspace"], lmax=3*p["nside"]-1,
+                             n_tt=len(spec["cl"]) - 1)
+    result = fitting.fit_parameters_tt(
+        data, initial_guess={...}, bounds={...},   # bounds: wide validity limits
+        priors={"A_ps_TT": (47.5, 8.5)},           # optional Gaussian priors
+        method="iminuit",                          # or "levenberg_marquardt"
+    )
 """
 
-from . import patch, power_spectrum, fitting
+from . import patch, power_spectrum, fitting, levenberg_marquardt
 
-__all__ = ["patch", "power_spectrum", "fitting"]
+__all__ = ["patch", "power_spectrum", "fitting", "levenberg_marquardt"]
