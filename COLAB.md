@@ -30,9 +30,13 @@ If you change the setup cells and want the changes to persist, use
 *Runtime → Change runtime type*:
 
 - **Hardware accelerator:** None (CPU). No GPU is used.
-- **Runtime shape:** **High-RAM** if available. The Section 2 joint covariance
-  and the Section 4 twelve-patch loop run at `nside=2048` and can OOM-kill the
-  free ~13 GB runtime (noted in the repo README). High-RAM (~25 GB) is safe.
+- **Runtime shape:** **High-RAM** is required. Sections 2 and 4 build NaMaster
+  workspaces and covariances at `nside=2048`, `lmax=2011` (the paper's ranges,
+  for every patch). A local WSL run needed close to the 31 GB available there,
+  so the free ~13 GB runtime will be OOM-killed. Use the largest High-RAM shape
+  you have. Section 4 frees the full-sky objects before the patches start; if
+  memory is still tight, run Section 1 and then Section 4 in a fresh runtime
+  (Section 4 reads the cached full-sky result).
 
 ---
 
@@ -119,7 +123,7 @@ URL `https://pla.esac.esa.int/pla/aio/product-action?MAP.MAP_ID=<FILENAME>`.
 
 ---
 
-## 4. Run the pipeline (Sections 1–6.1)
+## 4. Run the pipeline (Sections 1–5)
 
 From the `# Repo pipeline (verbatim ...)` divider onward the cells are
 identical to `patch_cosmology_fit.ipynb`. Run them top to bottom. Approximate
@@ -129,10 +133,13 @@ wall times on a High-RAM CPU runtime:
 |---|---|---|
 | 1 | Load SMICA hm1/hm2 maps + masks, one CAMB fiducial solve | ~1–2 min |
 | 2 | TT/TE/EE cross-spectra + 6-block joint Gaussian covariance (NaMaster) | ~10–15 min |
-| 3 | Full-sky joint fit (iminuit MIGRAD+HESSE; MINOS off by default) | a few min |
-| 4 | Twelve `nside=1` patches, each a full independent spectra+cov+fit | longest — tens of min |
-| 5 | Residuals + best-fit overlay plot | seconds |
-| 6 / 6.1 | Fixed-parameter example fit; `H0`–`omch2` contour | ~1–2 min |
+| 3 | Full-sky joint fit (`FIT_METHOD`: iminuit MIGRAD or Levenberg–Marquardt), comparison with arXiv:2504.05597 | a few min |
+| 4 | Twelve `nside=1` patches, each with its own spectra, covariance and fit at the paper's ℓ ranges; TT/TE/EE figures | ~6–8 min per patch locally (~1.5 h) — more on Colab |
+| 5 | `H0`–`omch2` 1σ/2σ ellipses from the fit covariance | seconds |
+
+Spectra and covariances are stored as likelihood packages under
+`output/likelihoods/`, so a rerun (e.g. with `fixed_params` set) skips NaMaster
+and only refits. See `PIPELINE.md`.
 
 The stale outputs saved in the committed notebook are from a previous local
 run — a useful reference for expected chi² and best-fit values. Do
@@ -143,10 +150,14 @@ run.
 
 ## 5. Getting results out
 
-Section 3–5 cells write to `/content/patch_cosmic_parameters/output/`
-(`fullsky_params_*.txt`, `patched_params_*.{png,txt}`,
-`patched_bandpowers_*.png`, `fullsky_spectrum_*.png`). This is **ephemeral** —
-gone when the runtime recycles. To keep them:
+Section 2–5 cells write to `/content/patch_cosmic_parameters/output/`:
+- `fullsky_*`, including `fullsky_vs_paper.txt`;
+- `patched_<tag>/` (per-patch result JSONs, parameter plot and dump, TT/TE/EE
+  figures);
+- `likelihoods/` (spectra + covariance packages — the expensive part).
+
+This is **ephemeral** — gone when the runtime recycles. Copy `output/likelihoods/`
+especially, so a later session doesn't recompute the spectra. To keep them:
 
 - **Files pane** (left sidebar) → navigate to `output/` → right-click → Download.
 - **Drive:** after `drive.mount(...)`, `!cp -r output /content/drive/MyDrive/patch_cosmo_output`.

@@ -5,6 +5,13 @@ end-to-end notebooks built on it. For a narrative writeup of what the
 notebooks measured and how those results compare to the literature, see
 [REPORT.md](REPORT.md).
 
+For the pipeline in one page, and how it differs from the reference analysis
+(Gimeno-Amo et al. 2025, arXiv:2504.05597), see [PIPELINE.md](PIPELINE.md).
+
+For why the per-patch fits used to stall at bounds or report fake-tiny
+errors, and how the fitting code now avoids it (with a checklist of points
+to verify), see [FIT_CONVERGENCE_FIXES.md](FIT_CONVERGENCE_FIXES.md).
+
 To run the joint pipeline somewhere other than a ready Linux box:
 - [COLAB.md](COLAB.md) -- step-by-step for Google Colab (uses
   `patch_cosmology_fit_colab.ipynb`: conda bootstrap, repo clone, and
@@ -42,7 +49,8 @@ automatically from the `NESTED` storage order in these files).
 cosmo_patch/
 ├── patch.py           # mask building, apodization, patch validation
 ├── power_spectrum.py  # NaMaster field/binning/Cl/covariance
-└── fitting.py         # CAMB wrapper, chi^2, iminuit fit
+├── fitting.py             # CAMB wrapper, chi^2, FitProblem, iminuit fit
+└── levenberg_marquardt.py # alternative minimizer (method="levenberg_marquardt")
 ```
 
 Each module maps to one pipeline stage and doesn't know about the others'
@@ -75,12 +83,15 @@ know about cosmological parameters, `fitting` doesn't know about masks
 
 | Function | Use it for |
 |---|---|
-| `camb_cl(H0, ombh2, omch2, As, ns, lmax, tau=0.0602, mnu=0.06, r=0.01)` | one CAMB Boltzmann solve, returns `{"TT", "EE", "BB", "TE"}` (lensed, raw `Cl` convention -- not `Dl`) |
+| `camb_cl(H0, ombh2, omch2, As, ns, lmax, tau=0.0602, mnu=0.06, r=0.01)` | one CAMB Boltzmann solve, returns `{"TT", "EE", "BB", "TE"}` (lensed, raw `Cl` convention -- not `Dl`). Memoized on the exact parameter values, so re-evaluating a cosmology (e.g. a step in a point-source amplitude only) costs no new solve; `camb_solve_count()` reports the solves done |
 | `point_source_dl_template(lmax, amplitude, ell_pivot=3000.0)` | the `Dl = amplitude * (ell/3000)^2` point-source nuisance template, as a raw `Cl` |
 | `decouple_theory(workspace, cl_theory)` | push a **list** of theory `Cl` arrays through the same mode-coupling workspace used for the data, so they land on the same bandpowers. `cl_theory` must match the workspace's own spin combination -- `[cl_tt]` for spin0×spin0, `[cl_te, cl_tb]` for spin0×spin2, `[cl_ee, cl_eb, cl_be, cl_bb]` for spin2×spin2 |
 | `FitData` / `chi_square(data, H0, ombh2, omch2, As, ns, A_ps_TT, A_ps_EE)` / `fit_parameters(...)` | the **joint TT+TE+EE** fit path: dataclass bundling data + covariance + all 3 workspaces, its chi^2, and the iminuit runner |
 | `FitDataTT` / `chi_square_tt(data, H0, ombh2, omch2, As, ns, A_ps_TT)` / `fit_parameters_tt(...)` | the **TT-only** fit path -- a separate, self-contained set of functions (not the joint ones with TE/EE left empty): one workspace, no TE/EE terms, no `A_ps_EE` |
-| `fit_parameters`/`fit_parameters_tt(data, initial_guess, bounds=None, fixed=None, initial_step=None, compute_minos=False, n_starts=6, seed=0, force_multistart=False)` | runs iminuit MIGRAD+HESSE (MINOS opt-in, see below), returns best-fit values, errors, chi^2, and the raw `Minuit` object, plus a `status` (`"ok"`/`"recovered"`/`"unresolved"`), `params_at_limit`, `n_starts_tried`, and `chi2_spread` -- an unreliable fit (not just non-converged, see "Known sharp edges" below) is automatically rescued with a multi-start search |
+| `fit_parameters`/`fit_parameters_tt(data, initial_guess, bounds=None, fixed=None, priors=None, initial_step=None, method="iminuit", compute_minos=False, run_hesse=False)` | **one** minimizer pass, no restarts. `method="iminuit"`: MIGRAD (gradient from the fixed-step Jacobian); `method="levenberg_marquardt"`: Gauss-Newton/LM on the whitened residuals. Both report the Gauss-Newton (Fisher) errors at their minimum; `run_hesse=True` adds HESSE errors as a diagnostic. `bounds` are wide *validity* limits (a smooth chi^2 wall, never Minuit `limits`); `priors={name: (mean, sigma)}` adds Gaussian priors (used for the point-source amplitudes on patches). Returns `best_fit`, `errors`, `errors_hesse`, `covariance`, `chi2` (data) / `chi2_prior`, `status` (`"ok"`/`"flagged"`) with the reasons in `flags`, `params_at_bound`, `n_iter`, `n_camb_solves`, and `minuit` (iminuit only) |
+| `bandpower_windows(workspace, n_keep)` / `save_likelihood(...)` / `load_likelihood(path, meta=None)` | a fit's likelihood as a small package (data, covariance, bandpower windows) instead of NaMaster workspaces -- `FitData` bins theory with the windows (identical to couple+decouple), and `fit_one_patch(..., likelihood_cache=path, likelihood_meta=...)` stores/reloads it so refits skip the spectra (see PIPELINE.md, "Stored results") |
+| `FitProblem` | the least-squares problem both methods minimize: whitened residual + prior rows + soft-wall rows, a central-difference Jacobian with fixed physical steps (`DEFAULT_STEP`), and the Gauss-Newton covariance |
+| `levenberg_marquardt.fit_levenberg_marquardt(problem)` | the LM minimizer itself (used through `method="levenberg_marquardt"`) |
 
 ## 3. Running the notebooks
 
@@ -121,6 +132,11 @@ full cell list before writing -- both notebooks in this repo were built
 incrementally that way.
 
 ## 4. Adapting the pipeline
+
+**Choosing the minimizer.** Each notebook has a `FIT_METHOD` flag next
+to its configuration: `"iminuit"` (default) or `"levenberg_marquardt"`.
+Both minimize the identical chi^2; outputs of the LM method get a
+`_levenberg_marquardt` suffix so the two never overwrite each other.
 
 **Fixing a subset of parameters.** `fit_parameters(..., fixed={"ns", "A_ps_EE"})`
 holds those parameters at their `initial_guess` value via iminuit's
@@ -204,43 +220,43 @@ again in a modified pipeline.
   instrumented run, plain `m.migrad()` converged in ~450s while the full
   `fit_parameters()` call (which also ran HESSE and MINOS for 6 free
   parameters) exceeded 1200s and had to be killed -- and neither notebook
-  even reads `result["minos"]`, only the HESSE-based `errors`. Fixed by
+  even reads `result["minos"]`, only the `errors`. Fixed by
   making MINOS opt-in (`compute_minos=False` by default); pass
   `compute_minos=True` only if you specifically want the asymmetric
   error bars. If a fit is unexpectedly slow, check what's actually being
   computed before assuming the model/covariance is at fault.
-- **MIGRAD's first numerical gradient can land in a negative-curvature
-  region if parameter scales are wildly different** (H0~70 vs As~1e-9),
-  triggering an expensive `NegativeG2LineSearch` recovery. Pass
-  `initial_step=` to `fit_parameters` (a rough expected-uncertainty-per-
-  parameter dict) to give it a well-conditioned starting point; the
-  TT-only notebook's weaker, more degenerate likelihood (no TE/EE to
-  break parameter degeneracies) is noticeably more prone to this than
-  the joint fit.
+- **Parameter scales differ by ten orders of magnitude** (H0~70 vs
+  As~1e-9), which used to leave MIGRAD's own numerical derivatives poorly
+  conditioned. Minuit now works in O(1) coordinates
+  `(p - initial_guess) / step` (`DEFAULT_STEP`, override with
+  `initial_step=`), and gets its gradient from the fixed-step Jacobian.
 - **An `nbclient`/Jupyter kernel that times out mid-cell can be left
   running as an orphaned process**, silently competing for CPU with
   whatever you run next. If a rerun is inexplicably slower than a nearly
   identical previous run, check `ps aux | grep ipykernel` before assuming
   the code itself regressed.
 - **A "converged" fit can still be wrong: a parameter pinned at its bound
-  with a suspiciously tiny HESSE error.** HESSE's parabolic-error
-  assumption is invalid right at a boundary, so a bound-pinned parameter
-  can come back looking artificially precise even when `m.valid` is
-  `True`. Empirically, three of the 12 TT-only patches came back
-  `converged=False`, and one of those (`A_ps_TT` pinned at its upper bound
-  of 200) reported `+/- 7.6e-05` -- clearly fake. `fit_parameters`/
-  `fit_parameters_tt` now check more than `m.valid` (accurate/posdef
-  covariance, HESSE success, EDM, and which parameters sit at a bound --
-  see `_fmin_diagnostics`/`_is_unreliable` in `fitting.py`), and when a fit
-  looks unreliable they rescue it with a genuine multi-start search spread
-  across the *whole* bounded parameter space (`_diverse_starts`, a manual
-  Latin Hypercube) rather than a cheap local retry -- a fit stuck at a
-  bound or in a local minimum usually hasn't explored the rest of the
-  space. The result dict gains `status` (`"ok"`/`"recovered"`/
-  `"unresolved"`), `params_at_limit`, `n_starts_tried`, and `chi2_spread`.
-  This only escalates when Minuit's own diagnostics flag trouble, so a
-  well-behaved fit still costs exactly one MIGRAD+HESSE pass; it can *not*
-  catch MIGRAD converging "cleanly" to an untagged local minimum -- no
-  flag-based check can, only actually searching elsewhere can -- for that,
-  pass `force_multistart=True` to always run the search (at full
-  multi-start cost on every fit).
+  with a suspiciously tiny HESSE error.** Minuit maps a bounded parameter
+  through `P = lo + (hi-lo)(sin(theta)+1)/2`, whose slope is zero at the
+  bound -- so a parameter sitting on a `limits` edge gets a collapsed error
+  (seen: `A_ps_TT = 200 +/- 7.6e-05`, `ns +/- 3e-05`). Two things pushed
+  parameters there: the point-source amplitudes are flat directions on a
+  patch (at ell <= 1000 the template is <= A/9 -- A_ps_TT ran to 200 in
+  nearly every patch), and the ns range (0.9, 1.05) was narrower than a
+  patch's sigma_ns. The former multi-start rescue never helped (every
+  start reached the same chi^2, `chi2_spread` ~ 1e-4) and was removed.
+  Now: no Minuit `limits` at all (wide validity bounds act as a smooth
+  chi^2 wall), Gaussian priors from the full-sky fit on the point-source
+  amplitudes of each patch, and every fit reports `status`/`flags`
+  instead of retrying.
+- **CAMB's chi^2 is not smooth to double precision, so don't trust HESSE
+  on it.** In H0 and omch2 it has step-like jumps of ~1e-4 (patch-like
+  chi^2 ~ 20). Minuit's numerical second derivatives see these as
+  curvature: at a synthetic patch minimum HESSE fails outright (forced
+  positive-definite fallback, H0 +/- 4e-7 -- the same signature as the
+  old fake errors) whatever `Minuit.precision` is set to, and after MIGRAD
+  it underestimated errors by up to ~2x. Errors therefore come from the
+  Gauss-Newton curvature `(J^T C^-1 J)^-1`, with the Jacobian from fixed
+  steps of ~0.2-1 sigma (`DEFAULT_STEP`, unchanged to 3 digits between
+  0.5x and 2x those steps); HESSE is opt-in (`run_hesse=True`) as a
+  diagnostic only.
