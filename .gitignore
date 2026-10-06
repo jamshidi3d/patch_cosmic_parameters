@@ -5,3 +5,4 @@ backup/
 input/
 reports/
 __pycache__/
+output/
