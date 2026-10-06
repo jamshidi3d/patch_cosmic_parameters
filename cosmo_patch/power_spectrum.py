@@ -14,6 +14,13 @@ The workspace is expensive to compute and is reused both for decoupling the
 data spectrum and for pushing theory spectra through the same mode coupling
 before comparing to data (see fitting.py) -- that consistency is what keeps
 the chi^2 unbiased.
+
+Covariance conventions (see docs/power_spectrum_errors.md): theory and noise
+spectra are passed around at *sky level* (beam-deconvolved). NaMaster's
+gaussian_covariance, however, needs the spectra of the fields as they are
+in the maps -- the workspace's decoupling divides by the beam itself -- so
+the covariance functions below multiply every leg by the fields' transfer
+functions (beam x pixel window) before calling it.
 """
 
 from __future__ import annotations
@@ -160,6 +167,13 @@ def compute_power_spectrum(
     }
 
 
+def _transfer(tf, lmax_plus_1):
+    """Transfer function as an array of length lmax+1 (ones if None)."""
+    if tf is None:
+        return np.ones(lmax_plus_1)
+    return np.asarray(tf, dtype=float)[:lmax_plus_1]
+
+
 def compute_gaussian_covariance(
     workspace: "nmt.NmtWorkspace",
     field_a: "nmt.NmtField",
@@ -167,6 +181,8 @@ def compute_gaussian_covariance(
     field_b: "nmt.NmtField | None" = None,
     noise_cl_a: np.ndarray | None = None,
     noise_cl_b: np.ndarray | None = None,
+    transfer_a: np.ndarray | None = None,
+    transfer_b: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Analytic Gaussian covariance of the bandpowers, following the standard
@@ -206,6 +222,16 @@ def compute_gaussian_covariance(
         the ell's where noise dominates over signal, inflating chi^2 and
         biasing the fit). Omit (or leave None) only for true noise-free
         fields, or when field_b is field_a itself.
+        Sky-level (beam-deconvolved) per-split noise, as returned by
+        estimate_noise_cl.
+    transfer_a, transfer_b : ndarray, shape (>= lmax+1,), optional
+        The transfer functions (beam x pixel window) the fields were built
+        with (`build_field`). Every leg is multiplied by them, because
+        NaMaster's covariance needs map-level spectra while the inputs here
+        are sky-level -- passing sky-level spectra unconvolved overestimates
+        the variance by 1/B_ell^4 (verified by simulation, see
+        docs/power_spectrum_errors.md). None means the field has no beam.
+        transfer_b defaults to transfer_a.
 
     Returns
     -------
@@ -218,8 +244,12 @@ def compute_gaussian_covariance(
     if noise_cl_b is None:
         noise_cl_b = np.zeros_like(cl_theory_guess)
 
-    cl_aa = cl_theory_guess + noise_cl_a
-    cl_bb = cl_theory_guess + noise_cl_b
+    n = len(cl_theory_guess)
+    ta = _transfer(transfer_a, n)
+    tb = _transfer(transfer_b if transfer_b is not None else transfer_a, n)
+    cl_aa = (cl_theory_guess + noise_cl_a) * ta * ta   # map-level legs
+    cl_bb = (cl_theory_guess + noise_cl_b) * tb * tb
+    cl_ab = cl_theory_guess * ta * tb
 
     cov_workspace = nmt.NmtCovarianceWorkspace()
     cov_workspace.compute_coupling_coefficients(field_a, field_b)
@@ -228,8 +258,8 @@ def compute_gaussian_covariance(
         cov_workspace,
         0, 0, 0, 0,  # spins of the two fields being correlated (spin-0 x spin-0)
         [cl_aa],
-        [cl_theory_guess],
-        [cl_theory_guess],
+        [cl_ab],
+        [cl_ab],
         [cl_bb],
         workspace,
     )
@@ -246,14 +276,17 @@ def estimate_noise_cl(
     spin: int = 0,
 ) -> np.ndarray:
     """
-    Estimate a split's noise power spectrum from the half-difference of two
+    Estimate the per-split noise power spectrum from the difference of two
     independent noise realizations of the same sky (e.g. half-mission maps).
 
     (map_a - map_b) / 2 cancels the shared CMB signal and any other
     common-to-both-splits sky component, leaving (n_a - n_b) / 2 -- a pure
-    noise map. Its auto-spectrum is (N_a + N_b) / 4, which is the per-split
-    noise N if the two splits have comparable noise levels (the usual case
-    for symmetric half-mission splits).
+    noise map. Its auto-spectrum is (N_a + N_b) / 4, i.e. *half* the
+    per-split noise N for symmetric splits (it is the noise of the coadded
+    map). This function therefore returns twice that power,
+    (N_a + N_b) / 2 -- the mean per-split noise, which is what the auto
+    legs of the covariance (C + N) need. (Verified by simulation: the
+    un-doubled estimate came out at 0.498 x the true per-split noise.)
 
     This uses a quick fsky-corrected pseudo-Cl (coupled Cl / mean(mask**2))
     rather than a full NaMaster decoupling -- adequate for a noise curve
@@ -283,6 +316,7 @@ def estimate_noise_cl(
     Returns
     -------
     noise_cl : ndarray, shape (lmax+1,)
+        Sky-level (beam- and pixel-window-deconvolved) per-split noise.
     """
     if spin == 0:
         half_diff = [(map_a - map_b) / 2.0]
@@ -304,7 +338,8 @@ def estimate_noise_cl(
     field_diff = nmt.NmtField(mask, half_diff, spin=spin, lmax=lmax)
     cl_coupled = nmt.compute_coupled_cell(field_diff, field_diff)[0]  # TT or EE: component 0
     fsky = np.mean(mask ** 2)
-    noise_cl = cl_coupled[: lmax + 1] / fsky
+    # x2: half-difference power is (N_a + N_b)/4; per-split noise is (N_a + N_b)/2
+    noise_cl = 2.0 * cl_coupled[: lmax + 1] / fsky
     if transfer_function is not None:
         # healpy's polarization pixel window is exactly 0 at ell=0,1
         # (undefined for a spin-2 field there) -- dividing by it would
@@ -335,6 +370,10 @@ def compute_joint_tt_te_ee_covariance(
     n_tt: int,
     n_te: int,
     n_ee: int,
+    *,
+    transfer_t: np.ndarray | None,
+    transfer_pol: np.ndarray | None,
+    noise_bb: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Joint Gaussian covariance of the stacked [TT, TE, EE] bandpowers,
@@ -391,6 +430,17 @@ def compute_joint_tt_te_ee_covariance(
     n_tt, n_te, n_ee : int
         Final bandpower count to keep for each spectrum (after dropping
         bin 0), matching the arrays passed into FitData.
+    transfer_t, transfer_pol : ndarray (keyword-only, required)
+        Transfer functions (beam x pixel window) the T and Pol fields were
+        built with. Each leg is multiplied by the transfer functions of its
+        two fields (TT: B_T^2, TE: B_T B_P, EE/BB: B_P^2), turning the
+        sky-level inputs into the map-level spectra NaMaster's covariance
+        expects (see the module docstring). Pass None explicitly only for
+        fields built without a beam.
+    noise_bb : ndarray, optional
+        Per-split B-mode noise for the auto legs' BB component (on a cut
+        sky, B noise leaks into the E bandpower variance). Defaults to
+        noise_ee (isotropic polarization noise).
 
     Returns
     -------
@@ -398,12 +448,17 @@ def compute_joint_tt_te_ee_covariance(
         Stacked [TT, TE, EE] joint covariance, each spectrum's bin 0
         (ell=[2,31]) already dropped to match FitData.cl_data.
     """
+    n = len(cl_tt)
+    bt, bp = _transfer(transfer_t, n), _transfer(transfer_pol, n)
+    if noise_bb is None:
+        noise_bb = noise_ee
     zero = np.zeros_like(cl_tt)
-    ctt_auto = cl_tt + noise_tt
-    ctt_cross = cl_tt
-    cte = [cl_te, zero]
-    cee_auto = [cl_ee + noise_ee, zero, zero, cl_bb]
-    cee_cross = [cl_ee, zero, zero, cl_bb]
+    # Map-level legs: auto (same split) carry noise, cross legs signal only.
+    ctt_auto = (cl_tt + noise_tt) * bt * bt
+    ctt_cross = cl_tt * bt * bt
+    cte = [cl_te * bt * bp, zero]
+    cee_auto = [(cl_ee + noise_ee) * bp * bp, zero, zero, (cl_bb + noise_bb) * bp * bp]
+    cee_cross = [cl_ee * bp * bp, zero, zero, cl_bb * bp * bp]
 
     cw_cache: dict = {}
 

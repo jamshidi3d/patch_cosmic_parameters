@@ -26,7 +26,7 @@ TT-only as an optional code path through the joint functions.
 Both fit paths build the same FitProblem (section 2b) and run one
 minimizer pass on it -- `method="iminuit"` (default) or
 `method="levenberg_marquardt"` (levenberg_marquardt.py). There are no
-restarts: see FIT_CONVERGENCE_FIXES.md for the causes of the earlier
+restarts: see docs/FIT_CONVERGENCE_FIXES.md for the causes of the earlier
 non-convergence / fake-tiny-error fits and how each is removed.
 """
 
@@ -205,7 +205,7 @@ def bandpower_windows(workspace, n_keep: int) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # 2b. The fit problem shared by both minimizers: whitened residuals, priors,
 #     a soft validity wall, and a finite-difference Jacobian with fixed
-#     physical steps. See FIT_CONVERGENCE_FIXES.md for why each piece is
+#     physical steps. See docs/FIT_CONVERGENCE_FIXES.md for why each piece is
 #     here -- in short: Minuit's hard `limits` (sin transform, zero slope at
 #     the bound) collapsed the covariance of any parameter that touched a
 #     bound, the point-source amplitudes are flat directions on a patch,
@@ -759,7 +759,7 @@ class FitDataTT:
     covariance, with the first bin (ell = [2, 31]) already dropped --
     typically built with power_spectrum.compute_gaussian_covariance
     (the single-spectrum, full-bin-to-bin-correlation covariance; see
-    REPORT.md for why this -- not the joint function's same-bin-only
+    docs/REPORT.md for why this -- not the joint function's same-bin-only
     simplification -- is the right choice for a standalone TT fit).
     """
 
@@ -985,6 +985,8 @@ def fit_one_patch(
         cl_fiducial["TT"], cl_fiducial["TE"], cl_fiducial["EE"], cl_fiducial["BB"],
         noise_tt, noise_ee,
         n_tt, n_te, n_ee,
+        transfer_t=beam_function * pixel_window_t,
+        transfer_pol=beam_function * pixel_window_pol,
     )
     errors = _power_spectrum.compute_errors(cov)
 
