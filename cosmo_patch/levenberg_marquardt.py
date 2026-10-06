@@ -49,8 +49,8 @@ def fit_levenberg_marquardt(
         rejected steps is declared stalled.
     edm_tol : float
         Convergence: the Gauss-Newton estimated distance to the minimum,
-        EDM = g^T (J^T J)^-1 g / 2 with g = J^T r (the same quantity
-        MIGRAD's EDM measures, in chi^2 units), below this.
+        EDM = g^T (J^T J)^-1 g / 2 with g = J^T r -- half the chi^2
+        decrease a full Gauss-Newton step predicts -- below this.
 
     Returns
     -------

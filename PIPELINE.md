@@ -6,6 +6,8 @@ Gimeno-Amo et al. 2025, *Exploring Statistical Isotropy in Planck Data Release 4
 ([arXiv:2504.05597](https://arxiv.org/abs/2504.05597)). For the fitting-code
 details (convergence, error bars, minimizers) see
 [FIT_CONVERGENCE_FIXES.md](FIT_CONVERGENCE_FIXES.md).
+For the theory behind each stage, see [docs/theory.md](docs/theory.md) and
+[docs/levenberg_marquardt.md](docs/levenberg_marquardt.md).
 
 ## Pipeline
 
