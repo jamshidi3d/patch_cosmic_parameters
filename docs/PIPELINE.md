@@ -6,8 +6,8 @@ Gimeno-Amo et al. 2025, *Exploring Statistical Isotropy in Planck Data Release 4
 ([arXiv:2504.05597](https://arxiv.org/abs/2504.05597)). For the fitting-code
 details (convergence, error bars, minimizers) see
 [FIT_CONVERGENCE_FIXES.md](FIT_CONVERGENCE_FIXES.md).
-For the theory behind each stage, see [docs/theory.md](docs/theory.md) and
-[docs/levenberg_marquardt.md](docs/levenberg_marquardt.md).
+For the theory behind each stage, see [docs/theory.md](theory.md) and
+[docs/levenberg_marquardt.md](levenberg_marquardt.md).
 
 ## Pipeline
 
@@ -92,29 +92,42 @@ before those two fixes.
 The paper gives **no per-patch data values** (only dipole directions and sim-based
 PTEs), so the per-patch fits can be checked for health but not number-by-number.
 
-**Full-sky result of this pipeline** (2026-10-06, iminuit; `output/fullsky_vs_paper.txt`):
-χ² = 178.2 for 171 bandpowers.
+**Full-sky result of this pipeline** (2026-10-06, after the covariance fix of
+[power_spectrum_errors.md](power_spectrum_errors.md) §8.2; iminuit;
+`output/fullsky_vs_paper.txt`): χ² = 178.9 for 171 bandpowers.
 
-| | this pipeline | paper, no debias | Δ / σ_paper | σ ratio |
-|---|---|---|---|---|
-| H0 | 66.45 ± 0.66 | 66.78 ± 0.50 | −0.66 | 1.31 |
-| Ωbh² | 0.02234 ± 0.00018 | 0.02212 ± 0.00013 | +1.66 | 1.36 |
-| Ωch² | 0.1219 ± 0.0014 | 0.1209 ± 0.0011 | +0.88 | 1.31 |
-| ln(10¹⁰As) | 3.061 ± 0.004 | 3.057 ± 0.0033 | +1.18 | 1.26 |
-| ns | 0.9633 ± 0.0050 | 0.9598 ± 0.0036 | +0.96 | 1.38 |
-| A_ps^TT | 47 ± 9 | 55 ± 4 | −1.9 | 2.1 |
-| A_ps^EE | 5.2 ± 1.4 | 0 ± 1 | +5.2 | 1.4 |
+| | this pipeline | paper, no debias | Δ / σ_paper | σ ratio | (before the fix: value, σ ratio) |
+|---|---|---|---|---|---|
+| H0 | 65.97 ± 0.60 | 66.78 ± 0.50 | −1.62 | 1.20 | 66.45, 1.31 |
+| Ωbh² | 0.02215 ± 0.00015 | 0.02212 ± 0.00013 | +0.19 | 1.19 | 0.02234, 1.36 |
+| Ωch² | 0.1231 ± 0.0014 | 0.1209 ± 0.0011 | +1.96 | 1.26 | 0.1219, 1.31 |
+| ln(10¹⁰As) | 3.064 ± 0.004 | 3.057 ± 0.0033 | +2.11 | 1.22 | 3.061, 1.26 |
+| ns | 0.9563 ± 0.0044 | 0.9598 ± 0.0036 | −0.97 | 1.23 | 0.9633, 1.38 |
+| A_ps^TT | 57.0 ± 4.2 | 55 ± 4 | +0.50 | 1.04 | 47, 2.14 |
+| A_ps^EE | 4.4 ± 1.5 | 0 ± 1 | +4.4 | 1.51 | 5.2, 1.36 |
 
-- **ΛCDM parameters.** All five agree within 0.7–1.7 σ_paper (≲ 1.3σ of the combined error).
-- **Error bars.** Ours are 26–38% larger, as expected from PR3 vs PR4 noise and the
+- **Point sources and baryons.** With the high-ℓ TT bandpowers correctly weighted, the
+  point-source amplitude A_ps^TT matches the paper (0.5σ, same precision) and Ωbh²
+  moves onto the paper's value.
+- **Other ΛCDM parameters.** H0, Ωch², As and ns lie 1–2 σ_paper away along the usual
+  H0–Ωch²–ns degeneracy.
+- **Error bars.** Ours are 19–26% larger than the paper's (26–38% before the fix). That
+  gap is what one expects from PR3 SMICA being noisier than PR4 SEVEM, and from the
   analytic covariance.
-- **Nuisances.** These differ most. They absorb the foreground and point-source
-  residuals of the specific cleaned map, and those residuals are not the same in
-  SMICA PR3 and SEVEM PR4.
-- **Why this is not fitting error.** The offsets are a data difference, not a
-  minimizer problem: both minimizers find the same minimum, and Gauss–Newton and HESSE
-  errors agree at full sky. Shifts of this size between PR3 and PR4 are typical.
+- **A_ps^EE.** It stays nonzero (4.4 ± 1.5, against the paper's 0 ± 1): a small-scale
+  polarized residual specific to SMICA PR3 (see
+  [point_source_amplitudes.md](point_source_amplitudes.md) §4).
+- **Why the remaining differences are not fitting error.** Both minimizers find the same
+  minimum, and the covariance is validated by simulation
+  ([power_spectrum_errors.md](power_spectrum_errors.md) §8.3). What is left is the data
+  difference (PR3 SMICA hm1×hm2 vs PR4 SEVEM A×B) and the analytic vs simulated
+  covariance.
 
+**Patches** (12/12 `status=ok`, `output/patched_all_varied/`):
+- χ² is 130–202 for 171 bandpowers (median ≈ 174), as expected for a correct
+  covariance.
+- A_ps^TT per patch is 50–83 ± 12–30, consistent with the full sky.
+- Parameter errors are 6–15% smaller than before the fix.
 
 **To close the remaining gaps later**
 - [ ] Obtain the PR4 SEVEM A/B maps (from the authors or NERSC) and rerun on them.

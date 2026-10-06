@@ -5,9 +5,10 @@ full sky and in 12 sky patches, as implemented in `cosmo_patch/` and the noteboo
 For each stage it gives the estimator or approximation used, and why. Companion
 documents:
 - [levenberg_marquardt.md](levenberg_marquardt.md): the LM minimizer;
-- [../PIPELINE.md](../PIPELINE.md): settings, and the differences from
+- [power_spectrum_errors.md](power_spectrum_errors.md): the derivation and validation of the bandpower errors;
+- [../PIPELINE.md](PIPELINE.md): settings, and the differences from
   arXiv:2504.05597;
-- [../FIT_CONVERGENCE_FIXES.md](../FIT_CONVERGENCE_FIXES.md): the history of the
+- [../FIT_CONVERGENCE_FIXES.md](FIT_CONVERGENCE_FIXES.md): the history of the
   fitting fixes.
 
 ---
@@ -105,11 +106,17 @@ $$
 and dresses it with mask-dependent coupling coefficients
 (`NmtCovarianceWorkspace`). The input spectra are evaluated as follows:
 - **Signal:** a fiducial CAMB ΛCDM spectrum (Planck 2018 parameters) for all legs.
-- **Noise:** only on *auto* legs of the same half-mission (e.g. $C^{T^1T^1} = C^{TT} + N^{TT}$).
-  The cross legs $T^1T^2$ are signal-only.
+- **Noise:** only on *auto* legs of the same half-mission (e.g. $C^{T^1T^1} = C^{TT} + N^{TT}$),
+  with $N$ the **per-split** noise, also on the BB component. The cross legs $T^1T^2$
+  are signal-only.
+- **Beam convention:** every leg is passed to NaMaster at *map level*, i.e. multiplied
+  by the beam × pixel window of its two fields. NaMaster's decoupling divides it out
+  once. The derivation and the Monte Carlo check of these conventions are in
+  [power_spectrum_errors.md](power_spectrum_errors.md).
 - **Noise estimate** (`power_spectrum.estimate_noise_cl`): from the half-difference
   map $(m^{hm1}-m^{hm2})/2$, which cancels the sky and leaves pure noise. Its pseudo-Cℓ
-  is divided by $\langle w^2\rangle$ (the f_sky correction) and by $B_\ell^2$.
+  is doubled (half-difference power = per-split noise / 2), then divided by
+  $\langle w^2\rangle$ (the f_sky correction) and by $B_\ell^2$.
 - **T and P noise:** assumed uncorrelated.
 
 **Joint TT+TE+EE (the paper's simplification).** Only *same-bin* terms are kept: the
@@ -247,4 +254,4 @@ OOM-killed at ~27 GB.
   likelihood is close to Gaussian in the parameters across about 1σ.
 - **Different data and covariance from the reference paper.** PR3 SMICA hm1×hm2
   instead of PR4 SEVEM A×B, and an analytic covariance instead of 600 E2E simulations
-  (hence no debiasing). See [../PIPELINE.md](../PIPELINE.md).
+  (hence no debiasing). See [../PIPELINE.md](PIPELINE.md).

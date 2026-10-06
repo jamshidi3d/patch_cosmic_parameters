@@ -10,11 +10,13 @@ Documentation:
 | Document | What it covers |
 |---|---|
 | [docs/theory.md](docs/theory.md) | How everything is implemented: pseudo-Cℓ / bandpower windows, covariance, model, likelihood, minimization, error bars, caching, assumptions |
+| [docs/power_spectrum_errors.md](docs/power_spectrum_errors.md) | Physics and math of the bandpower error bars: cosmic variance, noise and split cross-spectra, beam, partial sky, NaMaster Gaussian covariance; the covariance fixes of 2026-10-06 and their MC validation |
+| [docs/point_source_amplitudes.md](docs/point_source_amplitudes.md) | Physics of the A_ps nuisance amplitudes: unresolved radio/dusty galaxies, shot-noise ℓ² shape, why they bias ns/Ωbh²/H0 if ignored, what the fits find, their role on patches |
 | [docs/levenberg_marquardt.md](docs/levenberg_marquardt.md) | Theory of the Levenberg–Marquardt fitting method (`method="levenberg_marquardt"`) |
-| [PIPELINE.md](PIPELINE.md) | The pipeline in one page, stored results, and the differences from arXiv:2504.05597 (with the full-sky comparison) |
-| [FIT_CONVERGENCE_FIXES.md](FIT_CONVERGENCE_FIXES.md) | Why the per-patch fits used to stall at bounds or report fake-tiny errors, what was changed, test results, checklist |
-| [REPORT.md](REPORT.md) | Earlier narrative write-up of the measurements |
-| [COLAB.md](COLAB.md) / [WSL.md](WSL.md) | Running on Google Colab (`patch_cosmology_fit_colab.ipynb`) or on Windows via WSL2 (RAM management) |
+| [PIPELINE.md](docs/PIPELINE.md) | The pipeline in one page, stored results, and the differences from arXiv:2504.05597 (with the full-sky comparison) |
+| [FIT_CONVERGENCE_FIXES.md](docs/FIT_CONVERGENCE_FIXES.md) | Why the per-patch fits used to stall at bounds or report fake-tiny errors, what was changed, test results, checklist |
+| [REPORT.md](docs/REPORT.md) | Earlier narrative write-up of the measurements |
+| [COLAB.md](docs/COLAB.md) / [WSL.md](docs/WSL.md) | Running on Google Colab (`patch_cosmology_fit_colab.ipynb`) or on Windows via WSL2 (RAM management) |
 
 ## 1. Setup
 
@@ -138,7 +140,7 @@ Configuration switches sit in the notebooks' config cells:
 Section 4 needs only Section 1 and the cached full-sky result, so after a first full
 run you can restart, run Section 1, and jump to Section 4.
 
-Headless execution (for Colab or WSL see [COLAB.md](COLAB.md) / [WSL.md](WSL.md)):
+Headless execution (for Colab or WSL see [COLAB.md](docs/COLAB.md) / [WSL.md](docs/WSL.md)):
 
 ```python
 import nbformat

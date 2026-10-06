@@ -7,7 +7,7 @@ this repo, download the Planck PR3 inputs. This guide walks through running it
 end to end.
 
 For what the pipeline actually measures, see [REPORT.md](REPORT.md); for the
-`cosmo_patch` API, see [README.md](README.md).
+`cosmo_patch` API, see [README.md](../README.md).
 
 ---
 

@@ -16,7 +16,7 @@ This document reports what each notebook measured, how those numbers
 compare to the reference paper, and the methodological issues that
 surfaced while building the pipeline (several of which are real bugs
 worth knowing about if this code gets reused or extended). For how to
-run and adapt the notebooks, see [GUIDE.md](GUIDE.md).
+run and adapt the notebooks, see [GUIDE.md](../README.md).
 
 ## 1. Data and shared methodology
 
@@ -171,7 +171,7 @@ root cause, and verified fixed:
 Bugs #3 and #4 together were responsible for the joint fit's chi² of
 ~91,000 (n_bins=171) before being found; after both fixes, chi²/dof
 dropped to ≈1.14 and MIGRAD converged cleanly. See
-[GUIDE.md's "Known sharp edges" section](GUIDE.md#5-known-sharp-edges)
+[GUIDE.md's "Known sharp edges" section](../README.md#5-known-sharp-edges)
 for the code-level detail on each.
 
 ## 4. Known, deliberate deviations from the paper
