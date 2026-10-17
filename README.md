@@ -119,6 +119,7 @@ chains the other two modules for one sky region.
     first time, then from cache), and draws the TT, TE and EE per-patch figures plus
     the parameter plot with the full-sky ±1σ band.
   - **Section 5** draws the H0–Ωch² ellipses from the fit covariance.
+  - **Section 4.1** (after Section 4's last cell) is the **reverse pass**: the parameters Section 4 fitted are held at each patch's own best-fit values and the previously fixed `fixed_params` are fitted per patch. Results go to `output/patched_<tag>/reverse_pass/` (per-patch JSONs, parameter and χ² plots, `.txt` dump). Needs a non-empty `fixed_params`.
 - **`patch_cosmology_fit_TT.ipynb`** is the TT-only companion: full sky (full
   bin-to-bin TT covariance) and its own 12-patch loop. The loop runs TT up to
   ℓ = 2508 with Δℓ = 90, an A_ps_TT prior from the full sky, and, as currently
